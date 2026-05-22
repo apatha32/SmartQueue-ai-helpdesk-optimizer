@@ -1,0 +1,67 @@
+# prometheus-adapter-values.yaml
+#
+# Override values for the prometheus-community/prometheus-adapter Helm chart.
+# Install with:
+#   helm upgrade --install prometheus-adapter prometheus-community/prometheus-adapter \
+#     --namespace monitoring \
+#     --values infra/prometheus-adapter-values.yaml
+#
+# These rules expose redis_key_size{key="queue:pending"} as the External metric
+# "dtq_queue_depth" so the worker HPA can scale on Redis pending queue depth.
+
+prometheus:
+  url: http://kube-prometheus-stack-prometheus.monitoring.svc.cluster.local
+  port: 9090
+
+rules:
+  # ── External metrics ────────────────────────────────────────────────────────
+  # External metrics are global (not namespaced to a k8s resource), which is
+  # exactly what we want for a queue depth that spans the whole cluster.
+  external:
+    - seriesQuery: 'redis_key_size{key="queue:pending"}'
+      # Sum across all redis_exporter instances (there is only one, but this
+      # makes the rule robust if you ever run multiple exporters).
+      metricsQuery: 'sum(redis_key_size{key="queue:pending"})'
+      name:
+        as: "dtq_queue_depth"
+
+  # Keep the default CPU/memory rules that come with the adapter
+  resource:
+    cpu:
+      containerQuery: |
+        sum by (<<.GroupBy>>) (
+          rate(container_cpu_usage_seconds_total{container!="",<<.LabelMatchers>>}[2m])
+        )
+      nodeQuery: |
+        sum by (<<.GroupBy>>) (
+          rate(node_cpu_seconds_total{mode!="idle",mode!="iowait",mode!="steal",<<.LabelMatchers>>}[2m])
+        )
+      resources:
+        overrides:
+          node:
+            resource: node
+          namespace:
+            resource: namespace
+          pod:
+            resource: pod
+      containerLabel: container
+    memory:
+      containerQuery: |
+        sum by (<<.GroupBy>>) (
+          container_memory_working_set_bytes{container!="",<<.LabelMatchers>>}
+        )
+      nodeQuery: |
+        sum by (<<.GroupBy>>) (
+          node_memory_MemTotal_bytes{<<.LabelMatchers>>}
+          - node_memory_MemAvailable_bytes{<<.LabelMatchers>>}
+        )
+      resources:
+        overrides:
+          node:
+            resource: node
+          namespace:
+            resource: namespace
+          pod:
+            resource: pod
+      containerLabel: container
+    window: 3m

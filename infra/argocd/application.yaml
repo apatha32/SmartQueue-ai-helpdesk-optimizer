@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: dtq
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.io
+  annotations:
+    # Notify Slack/Teams on sync events (optional — requires ArgoCD notifications)
+    notifications.argoproj.io/subscribe.on-sync-failed.slack: dtq-alerts
+spec:
+  project: dtq
+
+  source:
+    repoURL: https://github.com/apatha32/DTQ.git
+    targetRevision: HEAD
+    path: infra/helm/dtq
+    helm:
+      valueFiles:
+        - values.yaml
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dtq
+
+  syncPolicy:
+    # Automatically sync when git changes are detected (CI commits updated image tags)
+    automated:
+      prune: true       # remove resources that are no longer in git
+      selfHeal: true    # revert manual changes to the cluster
+
+    syncOptions:
+      - CreateNamespace=true    # create the dtq namespace if it doesn't exist
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true          # prune only after all other resources are healthy
+
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

@@ -1,0 +1,21 @@
+DTQ has been deployed!
+
+API endpoint:
+  export API_URL=$(kubectl get svc {{ include "dtq.fullname" . }}-api \
+    -n {{ .Release.Namespace }} \
+    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+  echo "http://$API_URL:{{ .Values.api.service.port }}"
+
+Submit a test job:
+  curl -X POST http://$API_URL:{{ .Values.api.service.port }}/api/v1/jobs \
+    -H "Content-Type: application/json" \
+    -d '{"type":"email","payload":{"to":"test@example.com"},"priority":1}'
+
+Get queue stats:
+  curl http://$API_URL:{{ .Values.api.service.port }}/api/v1/stats
+
+Watch the worker HPA respond to queue depth:
+  kubectl get hpa {{ include "dtq.fullname" . }}-worker -n {{ .Release.Namespace }} -w
+
+Verify the custom metric is registered:
+  kubectl get --raw "/apis/external.metrics.k8s.io/v1beta1/namespaces/{{ .Release.Namespace }}/dtq_queue_depth"

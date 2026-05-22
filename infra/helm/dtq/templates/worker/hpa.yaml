@@ -1,0 +1,68 @@
+{{- if .Values.worker.hpa.enabled }}
+# ── Worker HPA — scales on Redis queue depth ──────────────────────────────────
+#
+# How it works:
+#   1. redis_exporter exposes redis_key_size{key="queue:pending"} to Prometheus.
+#   2. prometheus-adapter converts that into an External metric: dtq_queue_depth.
+#   3. This HPA reads dtq_queue_depth and keeps one worker replica per
+#      targetPendingJobsPerReplica jobs in the queue.
+#
+#   Example: 50 pending jobs, target = 10  →  ceil(50/10) = 5 worker replicas.
+#
+# Prerequisites (installed by `make bootstrap`):
+#   - kube-prometheus-stack  (provides Prometheus + Prometheus Operator)
+#   - prometheus-adapter     (configured via infra/prometheus-adapter-values.yaml)
+#
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "dtq.fullname" . }}-worker
+  labels:
+    {{- include "dtq.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "dtq.fullname" . }}-worker
+
+  minReplicas: {{ .Values.worker.hpa.minReplicas }}
+  maxReplicas: {{ .Values.worker.hpa.maxReplicas }}
+
+  metrics:
+    # ── Custom metric: Redis pending queue depth ──────────────────────────────
+    # Uses the External metric type so the queue depth is not tied to any
+    # particular Kubernetes resource — it's a raw number from Prometheus.
+    - type: External
+      external:
+        metric:
+          name: dtq_queue_depth
+        target:
+          type: AverageValue
+          # Desired average pending jobs per worker replica.
+          averageValue: {{ .Values.worker.hpa.targetPendingJobsPerReplica | quote }}
+
+    # ── Fallback: CPU utilisation ─────────────────────────────────────────────
+    # Keeps replicas from being scaled to zero when the queue is empty but
+    # workers are busy with long-running jobs.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30    # react quickly to bursts
+      policies:
+        - type: Pods
+          value: 4
+          periodSeconds: 60             # add at most 4 pods per minute
+    scaleDown:
+      stabilizationWindowSeconds: 120   # wait 2 min before scaling down
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60             # remove at most 2 pods per minute
+{{- end }}

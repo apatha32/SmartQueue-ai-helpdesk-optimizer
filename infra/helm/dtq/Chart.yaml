@@ -1,0 +1,14 @@
+apiVersion: v2
+name: dtq
+description: Distributed Task Queue — API, Worker, Redis, and Prometheus monitoring
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - task-queue
+  - redis
+  - worker
+  - golang
+maintainers:
+  - name: apatha32
+    url: https://github.com/apatha32

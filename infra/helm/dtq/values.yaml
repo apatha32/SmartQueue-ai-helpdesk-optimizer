@@ -1,0 +1,103 @@
+global:
+  # Base ECR registry URL — set by CI or override at install time.
+  # e.g.  123456789012.dkr.ecr.us-east-1.amazonaws.com
+  imageRegistry: ""
+
+# ── API ───────────────────────────────────────────────────────────────────────
+api:
+  replicaCount: 2
+
+  image:
+    repository: dtq-api
+    tag: "latest"        # updated by CI with the git-SHA tag
+    pullPolicy: IfNotPresent
+
+  service:
+    type: LoadBalancer   # change to ClusterIP + Ingress for production
+    port: 8080
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
+
+# ── Worker ────────────────────────────────────────────────────────────────────
+worker:
+  replicaCount: 2
+
+  image:
+    repository: dtq-worker
+    tag: "latest"        # updated by CI with the git-SHA tag
+    pullPolicy: IfNotPresent
+
+  # Goroutines per replica
+  poolSize: "5"
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 64Mi
+    limits:
+      cpu: 1000m
+      memory: 256Mi
+
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 10
+    # Scale up when the pending queue depth exceeds this many jobs per worker replica.
+    # With AverageValue semantics: desired_replicas = ceil(pending_jobs / targetPerReplica)
+    targetPendingJobsPerReplica: "10"
+
+# ── Redis ─────────────────────────────────────────────────────────────────────
+redis:
+  image:
+    repository: redis
+    tag: "7-alpine"
+    pullPolicy: IfNotPresent
+
+  service:
+    port: 6379
+
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: gp2   # use "standard" for local/minikube
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ── Redis Exporter ────────────────────────────────────────────────────────────
+# Exposes redis_key_size{key="queue:pending"} which drives the worker HPA.
+redisExporter:
+  enabled: true
+
+  image:
+    repository: oliver006/redis_exporter
+    tag: "v1.62.0"
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
+
+# ── ServiceMonitor ────────────────────────────────────────────────────────────
+# Requires kube-prometheus-stack (or any Prometheus Operator) to be installed.
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  # Namespace where your Prometheus Operator looks for ServiceMonitors.
+  # Leave empty to use the release namespace.
+  prometheusNamespace: "monitoring"

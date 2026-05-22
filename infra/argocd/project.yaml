@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: dtq
+  namespace: argocd
+  # Protect the project from accidental deletion
+  finalizers:
+    - resources-finalizer.argocd.io
+spec:
+  description: Distributed Task Queue project
+
+  # Allow deploying from this repository only
+  sourceRepos:
+    - https://github.com/apatha32/DTQ.git
+
+  # Allow deploying to the dtq namespace on the local cluster only
+  destinations:
+    - namespace: dtq
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+
+  # Permit all standard Kubernetes resources
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: "*"
+      kind: "*"

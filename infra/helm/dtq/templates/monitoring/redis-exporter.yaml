@@ -1,0 +1,71 @@
+{{- if .Values.redisExporter.enabled }}
+# ── Redis Exporter Deployment ─────────────────────────────────────────────────
+# Scrapes Redis and exposes redis_key_size{key="queue:pending"} which the
+# Prometheus Adapter converts into the dtq_queue_depth external metric used
+# by the worker HPA.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dtq.fullname" . }}-redis-exporter
+  labels:
+    {{- include "dtq.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "dtq.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis-exporter
+  template:
+    metadata:
+      labels:
+        {{- include "dtq.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: redis-exporter
+      annotations:
+        # Force Prometheus to scrape this pod directly (fallback if ServiceMonitor CRD missing)
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9121"
+    spec:
+      containers:
+        - name: redis-exporter
+          image: "{{ .Values.redisExporter.image.repository }}:{{ .Values.redisExporter.image.tag }}"
+          imagePullPolicy: {{ .Values.redisExporter.image.pullPolicy }}
+          env:
+            - name: REDIS_ADDR
+              value: "redis://{{ include "dtq.redisAddr" . }}"
+            # Tell the exporter to track the pending queue key so it emits
+            # redis_key_size{key="queue:pending"} — the metric the HPA reads.
+            - name: REDIS_EXPORTER_CHECK_KEYS
+              value: "queue:pending"
+          ports:
+            - name: metrics
+              containerPort: 9121
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.redisExporter.resources | nindent 12 }}
+---
+# ── Redis Exporter Service ────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dtq.fullname" . }}-redis-exporter
+  labels:
+    {{- include "dtq.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-exporter
+spec:
+  type: ClusterIP
+  ports:
+    - port: 9121
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "dtq.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-exporter
+{{- end }}

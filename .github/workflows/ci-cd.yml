@@ -1,0 +1,157 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+    # Only run when app code or infra values change
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "dashboard/**"
+      - "Dockerfile.*"
+      - "go.mod"
+      - "go.sum"
+      - "infra/helm/dtq/templates/**"
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  # ── 1. Build & Test ──────────────────────────────────────────────────────────
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build binaries
+        run: |
+          go build ./cmd/api/...
+          go build ./cmd/worker/...
+
+      - name: Run tests
+        run: go test ./... -race -count=1
+
+  # ── 2. Build, push images, update Helm values ────────────────────────────────
+  publish:
+    name: Publish & GitOps Update
+    runs-on: ubuntu-latest
+    needs: test
+
+    permissions:
+      id-token: write   # required for AWS OIDC
+      contents: write   # required to commit the values.yaml update back to git
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch full history so we can push the values.yaml commit back
+          fetch-depth: 0
+
+      # ── Derive a short deterministic image tag from the git SHA ──────────────
+      - name: Set image tag
+        id: meta
+        run: echo "tag=sha-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+
+      # ── Authenticate to AWS using OIDC (no long-lived credentials) ───────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── Build and push both images in parallel using Docker Buildx ───────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.api
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/dtq-api:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Worker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/dtq-worker:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Update Helm values.yaml with the new image tag and registry ──────────
+      # ArgoCD watches this file and auto-syncs when it changes (GitOps pattern).
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Update image tags in Helm values
+        env:
+          TAG:      ${{ steps.meta.outputs.tag }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          yq e ".global.imageRegistry = \"$REGISTRY\""    -i infra/helm/dtq/values.yaml
+          yq e ".api.image.tag    = \"$TAG\""             -i infra/helm/dtq/values.yaml
+          yq e ".worker.image.tag = \"$TAG\""             -i infra/helm/dtq/values.yaml
+
+      # ── Commit the updated values.yaml back to main ──────────────────────────
+      # [skip ci] prevents this commit from re-triggering the workflow.
+      - name: Commit and push updated Helm values
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add infra/helm/dtq/values.yaml
+          git diff --staged --quiet && echo "No changes to commit" && exit 0
+          git commit -m "ci: update image tags to ${{ steps.meta.outputs.tag }} [skip ci]"
+          git push
+
+  # ── 3. Verify ArgoCD sync (optional — requires ARGOCD_TOKEN secret) ──────────
+  verify-sync:
+    name: Verify ArgoCD Sync
+    runs-on: ubuntu-latest
+    needs: publish
+    if: ${{ vars.ARGOCD_SERVER != '' }}
+
+    steps:
+      - name: Install argocd CLI
+        run: |
+          curl -sSL -o /usr/local/bin/argocd \
+            https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x /usr/local/bin/argocd
+
+      - name: Wait for ArgoCD to sync
+        env:
+          ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER }}
+          ARGOCD_TOKEN:  ${{ secrets.ARGOCD_TOKEN }}
+        run: |
+          argocd app wait dtq \
+            --auth-token "$ARGOCD_TOKEN" \
+            --server     "$ARGOCD_SERVER" \
+            --grpc-web \
+            --timeout 300

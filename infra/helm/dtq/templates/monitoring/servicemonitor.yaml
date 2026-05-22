@@ -1,0 +1,30 @@
+{{- if and .Values.redisExporter.enabled .Values.serviceMonitor.enabled }}
+# ── ServiceMonitor ─────────────────────────────────────────────────────────────
+# Tells Prometheus Operator to scrape the Redis Exporter service.
+# Requires kube-prometheus-stack (or prometheus-operator) to be installed.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "dtq.fullname" . }}-redis-exporter
+  labels:
+    {{- include "dtq.labels" . | nindent 4 }}
+    app.kubernetes.io/component: redis-exporter
+    # This label must match the Prometheus Operator's serviceMonitorSelector.
+    # kube-prometheus-stack default: release=<helm-release-name>
+    release: kube-prometheus-stack
+  {{- with .Values.serviceMonitor.prometheusNamespace }}
+  namespace: {{ . }}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "dtq.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis-exporter
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      path: /metrics
+{{- end }}

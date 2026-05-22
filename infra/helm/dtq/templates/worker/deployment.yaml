@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dtq.fullname" . }}-worker
+  labels:
+    {{- include "dtq.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "dtq.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "dtq.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      # Allow the HPA to scale down gracefully — finish in-flight jobs first.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          image: {{ include "dtq.image" (dict "registry" .Values.global.imageRegistry "repository" .Values.worker.image.repository "tag" .Values.worker.image.tag) }}
+          imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+          env:
+            - name: REDIS_ADDR
+              value: {{ include "dtq.redisAddr" . | quote }}
+            - name: WORKER_POOL_SIZE
+              value: {{ .Values.worker.poolSize | quote }}
+          resources:
+            {{- toYaml .Values.worker.resources | nindent 12 }}
