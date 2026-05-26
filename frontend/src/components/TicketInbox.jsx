@@ -86,10 +86,10 @@ export default function TicketInbox() {
     setSimMsg("");
     try {
       const res = await simulateTickets(simCount);
-      setSimMsg(`✓ ${res.submitted} tickets submitted`);
+      setSimMsg(`${res.submitted} tickets submitted`);
       refreshJobs();
     } catch (e) {
-      setSimMsg(`✗ ${e.message}`);
+      setSimMsg(`Error: ${e.message}`);
     } finally {
       setSimRunning(false);
     }
@@ -125,7 +125,7 @@ export default function TicketInbox() {
           onClick={handleClassify}
           disabled={!text.trim() || classifying}
         >
-          {classifying ? "Classifying…" : "AI Classify →"}
+          {classifying ? "Classifying..." : "AI Classify"}
         </button>
 
         {classified && !classified.error && (
@@ -152,13 +152,13 @@ export default function TicketInbox() {
               onClick={handleSubmit}
               disabled={submitting}
             >
-              {submitting ? "Submitting…" : "Submit to Queue ↗"}
+              {submitting ? "Submitting..." : "Submit to Queue"}
             </button>
           </div>
         )}
         {classified?.error && <p className="error-msg">Error: {classified.error}</p>}
         {submitted && !submitted.error && (
-          <p className="success-msg">✓ Ticket queued — ID: {submitted.id?.slice(0, 8)}</p>
+          <p className="success-msg">Ticket queued — ID: {submitted.id?.slice(0, 8)}</p>
         )}
 
         {/* Simulator */}

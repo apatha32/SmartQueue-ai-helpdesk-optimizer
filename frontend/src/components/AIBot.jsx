@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { listJobs, streamBot } from "../api/index.js";
 
-const BOT_PLACEHOLDER = `Hello! I'm your AI support assistant powered by DeepSeek R1.
+const BOT_PLACEHOLDER = `Hello. I am your AI support assistant powered by DeepSeek R1.
 
-Select a ticket from the dropdown, or just ask me a general IT question.`;
+Select a ticket from the dropdown, or ask a general IT question.`;
 
 export default function AIBot() {
   const [jobs, setJobs]           = useState([]);
@@ -79,7 +79,7 @@ export default function AIBot() {
           const copy = [...prev];
           copy[copy.length - 1] = {
             ...copy[copy.length - 1],
-            content: `⚠ Error: ${err}`,
+            content: `Error: ${err}`,
           };
           return copy;
         });
@@ -113,8 +113,8 @@ export default function AIBot() {
       <div className="bot-sidebar card">
         <h2>AI Bot</h2>
         <p className="bot-sidebar-desc">
-          Powered by <strong>DeepSeek R1</strong> via OpenRouter.<br />
-          Ask anything or select a ticket for context.
+          Powered by <strong>DeepSeek R1</strong> via OpenRouter.
+          Select a ticket for context or ask a general IT question.
         </p>
 
         <label className="field-label">Ticket context</label>
@@ -183,7 +183,7 @@ export default function AIBot() {
             onClick={send}
             disabled={!input.trim() || streaming}
           >
-            {streaming ? "…" : "Send"}
+            {streaming ? "Sending..." : "Send"}
           </button>
         </div>
       </div>

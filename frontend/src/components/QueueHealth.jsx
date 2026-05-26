@@ -81,7 +81,7 @@ export default function QueueHealth() {
         <div className="card sla-card">
           <h2>SLA Risk</h2>
           {slaRisks.length === 0 ? (
-            <p className="empty-msg">No at-risk tickets right now 🟢</p>
+            <p className="empty-msg">No at-risk tickets at this time.</p>
           ) : (
             <table className="sla-table">
               <thead>
@@ -118,7 +118,7 @@ export default function QueueHealth() {
           <div className="recs-header">
             <h2>AI Recommendations</h2>
             <button className="btn btn-primary" onClick={fetchRecs} disabled={loadingRecs}>
-              {loadingRecs ? "Analysing…" : "Analyse Queue →"}
+              {loadingRecs ? "Analysing..." : "Analyse Queue"}
             </button>
           </div>
 
