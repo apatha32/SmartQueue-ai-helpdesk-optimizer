@@ -44,35 +44,42 @@ TICKET_POOL = [
 
 
 async def simulate_tickets(count: int, api_base: str = "http://api:8080") -> list[dict]:
-    """Classify and submit `count` realistic tickets to the Go API."""
-    selected = random.choices(TICKET_POOL, k=min(count, len(TICKET_POOL) * 2))
-    submitted: list[dict] = []
+    """Classify and submit `count` realistic tickets to the Go API concurrently."""
+    selected = random.choices(TICKET_POOL, k=min(count, len(TICKET_POOL) * 2))[:count]
 
-    async with httpx.AsyncClient(timeout=15.0) as http:
-        for tmpl in selected[:count]:
-            try:
-                classification = await classify_ticket(tmpl["text"], tmpl["customer_tier"])
-                job_body = {
-                    "type": "support_ticket",
-                    "payload": {
-                        "text": tmpl["text"],
-                        "customer_tier": tmpl["customer_tier"],
-                        "category": classification.get("category", "technical"),
-                        "tier": classification.get("tier", "tier1"),
-                        "estimated_minutes": classification.get("estimated_minutes", 30),
-                        "sla_hours": classification.get("sla_hours", 8),
-                        "summary": classification.get("summary", tmpl["text"][:60]),
-                        "tags": classification.get("tags", []),
-                        "submitted_at": datetime.now(timezone.utc).isoformat(),
-                    },
-                    "priority": classification.get("priority", 3),
-                    "max_retries": 3,
-                }
+    async def process_one(tmpl: dict) -> dict | None:
+        try:
+            classification = await classify_ticket(tmpl["text"], tmpl["customer_tier"])
+            job_body = {
+                "type": "support_ticket",
+                "payload": {
+                    "text": tmpl["text"],
+                    "customer_tier": tmpl["customer_tier"],
+                    "category": classification.get("category", "technical"),
+                    "tier": classification.get("tier", "tier1"),
+                    "estimated_minutes": classification.get("estimated_minutes", 30),
+                    "sla_hours": classification.get("sla_hours", 8),
+                    "summary": classification.get("summary", tmpl["text"][:60]),
+                    "tags": classification.get("tags", []),
+                    "submitted_at": datetime.now(timezone.utc).isoformat(),
+                },
+                "priority": classification.get("priority", 3),
+                "max_retries": 3,
+            }
+            async with httpx.AsyncClient(timeout=15.0) as http:
                 resp = await http.post(f"{api_base}/api/v1/jobs", json=job_body)
                 if resp.status_code == 201:
-                    submitted.append({**job_body, "id": resp.json().get("id")})
-            except Exception as exc:
-                print(f"[simulator] ticket failed: {exc}")
-            await asyncio.sleep(0.05)
+                    return {**job_body, "id": resp.json().get("id")}
+        except Exception as exc:
+            print(f"[simulator] ticket failed: {exc}")
+        return None
 
-    return submitted
+    # Run all classifications and submissions concurrently — 10 at a time
+    results = []
+    batch_size = 10
+    for i in range(0, len(selected), batch_size):
+        batch = selected[i:i + batch_size]
+        batch_results = await asyncio.gather(*[process_one(t) for t in batch])
+        results.extend(r for r in batch_results if r is not None)
+
+    return results

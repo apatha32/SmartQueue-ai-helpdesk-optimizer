@@ -13,7 +13,6 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"distributed-task-queue/internal/ai"
 	"distributed-task-queue/internal/queue"
 	"distributed-task-queue/internal/worker"
 )
@@ -54,16 +53,10 @@ func main() {
 			return nil
 		},
 		"ai_agent": func(ctx context.Context, job *queue.Job) error {
-			task, ok := job.Payload["task"].(string)
-			if !ok || task == "" {
-				return fmt.Errorf("ai_agent: payload missing required string field \"task\"")
-			}
-			log.Printf("ai_agent job=%s task=%.80s...", job.ID, task)
-			result, err := ai.Complete(ctx, task)
-			if err != nil {
-				return fmt.Errorf("ai_agent: %w", err)
-			}
-			log.Printf("ai_agent job=%s response=%.120s...", job.ID, result)
+			// AI processing is handled by the Python rag service.
+			// Log and complete gracefully so legacy jobs don't dead-letter.
+			task, _ := job.Payload["task"].(string)
+			log.Printf("ai_agent job=%s task=%.80s (no-op: use /api/ai/* endpoints)", job.ID, task)
 			return nil
 		},
 		"support_ticket": func(ctx context.Context, job *queue.Job) error {
