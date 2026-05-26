@@ -82,8 +82,6 @@ async def health():
 async def classify(req: ClassifyRequest):
     if check_injection(req.text):
         raise HTTPException(status_code=400, detail="Invalid input detected")
-    if not os.getenv("OPENROUTER_API_KEY"):
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY not configured")
     try:
         result = await classify_ticket(req.text, req.customer_tier)
         return result

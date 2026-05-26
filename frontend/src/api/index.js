@@ -18,12 +18,16 @@ export const submitJob  = body =>
   }).then(r => r.json());
 
 // ── AI Service API ────────────────────────────────────────────
-export const classifyTicket = (text, customer_tier = "standard") =>
-  fetch(`${AI}/classify`, {
+export const classifyTicket = async (text, customer_tier = "standard") => {
+  const r = await fetch(`${AI}/classify`, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({ text, customer_tier }),
-  }).then(r => r.json());
+  });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
+  return body;
+};
 
 export const getRecommendations = async queue_stats => {
   const r = await fetch(`${AI}/recommend`, {

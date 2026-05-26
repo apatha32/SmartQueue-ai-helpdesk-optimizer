@@ -70,9 +70,9 @@ func main() {
 			log.Printf("support_ticket job=%s category=%s tier=%s summary=%.80s",
 				job.ID, category, tier, summary)
 			// Simulate agent work — scale estimated_minutes down for demo speed
-			workDuration := time.Duration(estimatedMin*200) * time.Millisecond
-			if workDuration > 3*time.Second {
-				workDuration = 3 * time.Second
+			workDuration := time.Duration(estimatedMin*300) * time.Millisecond
+			if workDuration > 10*time.Second {
+				workDuration = 10 * time.Second
 			}
 			time.Sleep(workDuration)
 			return nil
