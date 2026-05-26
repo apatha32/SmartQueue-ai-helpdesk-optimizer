@@ -43,6 +43,31 @@ TICKET_POOL = [
 ]
 
 
+def _fallback_classify(text: str, customer_tier: str) -> dict:
+    """Keyword-based classification used when the LLM is unavailable."""
+    text_lower = text.lower()
+    if any(w in text_lower for w in ("critical", "down", "outage", "breach", "compromised", "payment")):
+        priority, category, sla = 1, "incident", 1
+    elif any(w in text_lower for w in ("slow", "broken", "sso", "login", "export", "rate limit", "double", "invoice")):
+        priority, category, sla = 2, "technical", 4
+    elif any(w in text_lower for w in ("notification", "crash", "import", "spam", "locked", "access")):
+        priority, category, sla = 3, "technical", 8
+    else:
+        priority, category, sla = 4, "feature_request", 24
+
+    tier_map = {"enterprise": "tier1", "standard": "tier2", "free": "tier3"}
+    minutes_map = {1: 30, 2: 60, 3: 120, 4: 240}
+    return {
+        "priority": priority,
+        "category": category,
+        "tier": tier_map.get(customer_tier, "tier2"),
+        "estimated_minutes": minutes_map[priority],
+        "sla_hours": sla,
+        "summary": text[:80],
+        "tags": [category],
+    }
+
+
 async def simulate_tickets(count: int, api_base: str = "http://api:8080") -> list[dict]:
     """Classify and submit `count` realistic tickets to the Go API concurrently."""
     selected = random.choices(TICKET_POOL, k=min(count, len(TICKET_POOL) * 2))[:count]
@@ -50,6 +75,10 @@ async def simulate_tickets(count: int, api_base: str = "http://api:8080") -> lis
     async def process_one(tmpl: dict) -> dict | None:
         try:
             classification = await classify_ticket(tmpl["text"], tmpl["customer_tier"])
+        except Exception as exc:
+            print(f"[simulator] LLM unavailable, using fallback: {exc}")
+            classification = _fallback_classify(tmpl["text"], tmpl["customer_tier"])
+        try:
             job_body = {
                 "type": "support_ticket",
                 "payload": {
