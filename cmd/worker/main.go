@@ -13,6 +13,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"distributed-task-queue/internal/ai"
 	"distributed-task-queue/internal/queue"
 	"distributed-task-queue/internal/worker"
 )
@@ -50,6 +51,19 @@ func main() {
 		"report": func(ctx context.Context, job *queue.Job) error {
 			log.Printf("generating report payload=%v", job.Payload)
 			time.Sleep(time.Duration(rand.Intn(1500)+500) * time.Millisecond)
+			return nil
+		},
+		"ai_agent": func(ctx context.Context, job *queue.Job) error {
+			task, ok := job.Payload["task"].(string)
+			if !ok || task == "" {
+				return fmt.Errorf("ai_agent: payload missing required string field \"task\"")
+			}
+			log.Printf("ai_agent job=%s task=%.80s...", job.ID, task)
+			result, err := ai.Complete(ctx, task)
+			if err != nil {
+				return fmt.Errorf("ai_agent: %w", err)
+			}
+			log.Printf("ai_agent job=%s response=%.120s...", job.ID, result)
 			return nil
 		},
 	}

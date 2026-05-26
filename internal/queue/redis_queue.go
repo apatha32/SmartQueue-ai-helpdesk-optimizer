@@ -259,6 +259,23 @@ func (q *RedisQueue) RecoverStale(ctx context.Context, timeout time.Duration) (i
 	return recovered, nil
 }
 
+// ListDeadJobs returns up to limit dead-letter job objects, newest first.
+func (q *RedisQueue) ListDeadJobs(ctx context.Context, limit int64) ([]*Job, error) {
+	ids, err := q.client.LRange(ctx, deadKey, 0, limit-1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("list dead jobs: %w", err)
+	}
+	jobs := make([]*Job, 0, len(ids))
+	for _, id := range ids {
+		job, err := q.GetJob(ctx, id)
+		if err != nil || job == nil {
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
+}
+
 // RetryDead removes a job from the dead-letter list, resets its retry counter,
 // and re-enqueues it as a fresh pending job.
 func (q *RedisQueue) RetryDead(ctx context.Context, jobID string) (*Job, error) {

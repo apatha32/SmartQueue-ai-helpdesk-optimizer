@@ -25,4 +25,7 @@ type Queue interface {
 	// RetryDead removes a job from the dead-letter list, resets its retry
 	// counter, and re-enqueues it.
 	RetryDead(ctx context.Context, jobID string) (*Job, error)
+
+	// ListDeadJobs returns up to limit dead-letter jobs, newest first.
+	ListDeadJobs(ctx context.Context, limit int64) ([]*Job, error)
 }

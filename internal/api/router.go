@@ -10,6 +10,7 @@ func NewRouter(h *Handler) *gin.Engine {
 	v1 := r.Group("/api/v1")
 	{
 		v1.POST("/jobs", h.SubmitJob)
+		v1.GET("/jobs/dead", h.ListDeadJobs) // must be before /:id
 		v1.GET("/jobs/:id", h.GetJob)
 		v1.POST("/jobs/:id/retry", h.RetryJob)
 		v1.GET("/stats", h.GetStats)

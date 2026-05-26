@@ -12,6 +12,16 @@ services:
       timeout: 3s
       retries: 5
 
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8001"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+
   api:
     build:
       context: .
@@ -36,6 +46,7 @@ services:
     environment:
       - REDIS_ADDR=redis:6379
       - WORKER_POOL_SIZE=5
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     depends_on:
       redis:
         condition: service_healthy
@@ -44,18 +55,41 @@ services:
     deploy:
       replicas: 2
 
-  dashboard:
+  rag:
     build:
-      context: ./dashboard
+      context: ./rag
       dockerfile: Dockerfile
     ports:
-      - "8501:8501"
+      - "8000:8000"
     environment:
-      - API_URL=http://api:8080
       - REDIS_ADDR=redis:6379
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8001
+    depends_on:
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3001:80"
     depends_on:
       api:
+        condition: service_healthy
+      rag:
         condition: service_healthy
 
 volumes:
   redis_data:
+  chroma_data:
