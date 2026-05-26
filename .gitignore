@@ -13,5 +13,9 @@
 # Docker volumes / data
 redis_data/
 
+# Node
+node_modules/
+frontend/node_modules/
+
 # macOS
 .DS_Store
