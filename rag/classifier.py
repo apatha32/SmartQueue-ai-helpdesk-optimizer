@@ -37,6 +37,7 @@ def _llm() -> AsyncOpenAI:
     return AsyncOpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=os.getenv("OPENROUTER_API_KEY", ""),
+        max_retries=0,  # fail fast — callers have their own fallback
         default_headers={
             "HTTP-Referer": "https://huggingface.co/spaces/ambarish0221/DTQ",
             "X-Title": "SmartQueue",
@@ -69,6 +70,7 @@ async def classify_ticket(text: str, customer_tier: str = "standard") -> dict:
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=250,
+            timeout=10.0,
         )
         raw = resp.choices[0].message.content.strip()
         # Strip markdown fences if model adds them

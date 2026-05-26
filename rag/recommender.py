@@ -93,6 +93,7 @@ async def get_recommendations(queue_stats: dict) -> dict:
             messages=[{"role": "user", "content": _PROMPT.format(queue_summary=summary)}],
             temperature=0.3,
             max_tokens=600,
+            timeout=10.0,
         )
         raw = resp.choices[0].message.content.strip()
         if raw.startswith("```"):
