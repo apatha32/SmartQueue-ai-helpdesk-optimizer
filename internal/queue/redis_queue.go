@@ -293,6 +293,23 @@ func (q *RedisQueue) ListPendingJobs(ctx context.Context, limit int64) ([]*Job, 
 	return jobs, nil
 }
 
+// ListProcessingJobs returns all jobs currently in the processing hash.
+func (q *RedisQueue) ListProcessingJobs(ctx context.Context) ([]*Job, error) {
+	entries, err := q.client.HGetAll(ctx, processingKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("list processing jobs: %w", err)
+	}
+	jobs := make([]*Job, 0, len(entries))
+	for jobID := range entries {
+		job, err := q.GetJob(ctx, jobID)
+		if err != nil || job == nil {
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
+}
+
 // RetryDead removes a job from the dead-letter list, resets its retry counter,
 // and re-enqueues it as a fresh pending job.
 func (q *RedisQueue) RetryDead(ctx context.Context, jobID string) (*Job, error) {

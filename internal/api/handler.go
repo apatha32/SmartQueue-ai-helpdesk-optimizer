@@ -111,17 +111,23 @@ func (h *Handler) ListDeadJobs(c *gin.Context) {
 	c.JSON(http.StatusOK, jobs)
 }
 
-// GET /api/v1/jobs — list pending jobs (up to 100, highest priority first).
+// GET /api/v1/jobs — list pending + processing jobs (up to 100, highest priority first).
 func (h *Handler) ListJobs(c *gin.Context) {
-	jobs, err := h.queue.ListPendingJobs(c.Request.Context(), 100)
+	ctx := c.Request.Context()
+	pending, err := h.queue.ListPendingJobs(ctx, 100)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if jobs == nil {
-		jobs = []*queue.Job{}
+	processing, err := h.queue.ListProcessingJobs(ctx)
+	if err != nil {
+		processing = nil
 	}
-	c.JSON(http.StatusOK, jobs)
+	all := append(pending, processing...)
+	if all == nil {
+		all = []*queue.Job{}
+	}
+	c.JSON(http.StatusOK, all)
 }
 
 // GET /health — liveness probe.

@@ -31,4 +31,7 @@ type Queue interface {
 
 	// ListPendingJobs returns up to limit pending jobs, highest priority first.
 	ListPendingJobs(ctx context.Context, limit int64) ([]*Job, error)
+
+	// ListProcessingJobs returns jobs that are currently being worked on.
+	ListProcessingJobs(ctx context.Context) ([]*Job, error)
 }

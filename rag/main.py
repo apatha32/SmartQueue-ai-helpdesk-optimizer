@@ -93,8 +93,6 @@ async def classify(req: ClassifyRequest):
 
 @app.post("/api/ai/recommend")
 async def recommend(req: RecommendRequest):
-    if not os.getenv("OPENROUTER_API_KEY"):
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY not configured")
     try:
         return await get_recommendations(req.queue_stats)
     except Exception as exc:

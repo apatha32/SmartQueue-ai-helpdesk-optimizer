@@ -25,12 +25,16 @@ export const classifyTicket = (text, customer_tier = "standard") =>
     body:    JSON.stringify({ text, customer_tier }),
   }).then(r => r.json());
 
-export const getRecommendations = queue_stats =>
-  fetch(`${AI}/recommend`, {
+export const getRecommendations = async queue_stats => {
+  const r = await fetch(`${AI}/recommend`, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
     body:    JSON.stringify({ queue_stats }),
-  }).then(r => r.json());
+  });
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
+  return body;
+};
 
 export const simulateTickets = (count, api_base = "http://api:8080") =>
   fetch(`${AI}/simulate`, {
