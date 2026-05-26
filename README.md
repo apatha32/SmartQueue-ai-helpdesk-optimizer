@@ -1,76 +1,85 @@
-# Distributed Task Queue
+# SmartQueue — AI Helpdesk Workload Optimizer
 
-A production-grade distributed task queue built with **Go**, **Redis**, **React**, and **FastAPI**. Features priority scheduling, automatic retries, dead-letter handling, stale job recovery, a LangGraph ReAct RAG agent with hybrid retrieval, and a live React dashboard — all orchestrated with Docker Compose.
+A production-grade distributed task queue built on Go, Redis, Python, and React, with an integrated AI layer that classifies support tickets, forecasts workload, and provides a real-time streaming assistant for resolving them. Designed to demonstrate how AI can be embedded into a real distributed system to solve a concrete business problem: managing support ticket floods on busy days.
+
+---
+
+## What It Does
+
+Support teams face unpredictable ticket volume. SmartQueue addresses this with three capabilities:
+
+- **Ticket classification** — incoming support requests are automatically categorised, prioritised (P1-P4), assigned an SLA deadline, and routed to the correct team tier using a large language model.
+- **Queue health and recommendations** — the system continuously monitors queue state and generates actionable AI recommendations (escalate, batch, defer, reassign) when workload patterns indicate risk.
+- **AI worker bot** — agents can open a chat with an AI assistant that has access to the ticket context and a knowledge base of IT runbooks, powered by streaming inference.
+
+---
+
+## Technical Stack
+
+| Layer | Technology | Purpose |
+|---|---|---|
+| API server | Go 1.22, Gin | Job ingestion, queue management, REST endpoints |
+| Worker pool | Go, goroutines | Concurrent job execution with retry and dead-letter logic |
+| Queue backend | Redis 7 (sorted set) | Priority queue, processing tracker, dead-letter list |
+| AI service | Python 3.12, FastAPI | Ticket classification, workload recommendations, streaming bot |
+| LLM provider | OpenRouter (free tier) | LLaMA 3.3 70B for classification/recommendations, DeepSeek R1 for bot |
+| Knowledge base | ChromaDB 0.5, ONNX embeddings | IT runbook retrieval for bot context injection |
+| Session memory | Redis | Per-session conversation history for the AI bot |
+| Frontend | React 18, Vite, nginx | Live dashboard — Ticket Inbox, Queue Health, AI Bot |
+| Infrastructure | Docker Compose | Local multi-service orchestration |
+| Kubernetes | Helm, Terraform (EKS), ArgoCD | Production deployment manifests (infra/ directory) |
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────┐
-│   React Frontend    │  :80  (nginx — serves UI + proxies API calls)
-└────────┬────────────┘
-         │
-    ┌────┴──────────────────────────┐
-    │           nginx proxy          │
-    └────┬─────────────┬────────────┘
-         │             │
-         ▼             ▼
-┌──────────────┐  ┌──────────────────┐     ┌──────────────────┐
-│  API (Gin)   │  │  RAG Service     │     │  Redis           │
-│  :8080       │  │  (FastAPI) :8000 │────▶│  (session memory │
-└──────┬───────┘  └──────┬───────────┘     │   + queue state) │
-       │                 │                 └──────────────────┘
-       ▼                 ▼
-┌──────────────┐  ┌──────────────────┐
-│  Redis Queue │  │  ChromaDB        │
-│  (Sorted Set)│  │  (vector store)  │
-└──────┬───────┘  └──────────────────┘
-       │
-       │ poll
-┌──────▼───────┐
-│ Worker Pool  │
-│ 2 replicas × │
-│ 5 goroutines │
-└──────────────┘
+Browser
+  |
+  | HTTP / SSE
+  v
+React Frontend (nginx :3001)
+  |--- /api/v1/*  ---> Go API Server (:8080)
+  |--- /api/ai/*  ---> Python AI Service (:8000)
+                              |
+              +---------------+---------------+
+              |               |               |
+         Classifier      Recommender        Bot (SSE)
+         (LLaMA 3.3)     (LLaMA 3.3)    (DeepSeek R1)
+              |               |               |
+              +--------> OpenRouter API <------+
+                              |
+                         ChromaDB
+                     (IT runbook vectors)
+
+Go API Server <----> Redis <----> Go Worker Pool (2 replicas x 5 goroutines)
+                                      |
+                              support_ticket handler
+                              email / image_resize / report handlers
 ```
-
-### Components
-
-| Service | Language / Stack | Role |
-|---|---|---|
-| **API** | Go / Gin | Accepts jobs, exposes status, stats, and dead-letter endpoints |
-| **Worker** | Go | Pool of goroutines that dequeue and process jobs (including `ai_agent` via Anthropic Claude) |
-| **Redis** | Redis 7 | Priority queue, processing tracker, dead-letter list, RAG session memory, eval cache |
-| **RAG Service** | Python / FastAPI | LangGraph ReAct agent, hybrid retrieval, SSE streaming chat, RAGAS evaluation |
-| **ChromaDB** | ChromaDB | Persistent vector store for dense retrieval |
-| **Frontend** | React + Vite / nginx | Live dashboard — queue stats, job submission, RAG chat, dead-letter inspector |
 
 ---
 
-## Features
+## Key Features
 
-### Task Queue
-- **Priority scheduling** — High / Medium / Low; jobs sorted by priority then FIFO within the same level
-- **Automatic retries** — configurable `max_retries` per job; failed jobs are re-enqueued with a back-off penalty
-- **Dead-letter queue** — jobs that exhaust retries are parked with their last error; listable via API
-- **API retry** — dead-letter jobs can be re-enqueued via a single API call, resetting retries to zero
-- **Stale job recovery** — background sweeper re-enqueues jobs stuck in `processing` for > 5 minutes
-- **Per-job timeout** — each handler gets a 30-second context deadline; hung jobs are automatically failed
-- **Horizontal scaling** — worker replicas controlled by `WORKER_POOL_SIZE`; Compose runs 2 replicas out of the box
+### Distributed Task Queue
+- Priority scheduling — jobs sorted by priority (P1-P4) then FIFO within the same level
+- Automatic retries — configurable max retries per job; exhausted jobs move to dead-letter
+- Dead-letter queue — failed jobs preserved with error context; retryable via API
+- Stale job recovery — background sweeper rescues jobs stuck in processing for more than 5 minutes
+- Horizontal scaling — worker replicas and pool size independently configurable
+- Per-job timeout — each handler receives a context deadline; hung jobs are automatically failed
 
-### AI / RAG Agent
-- **LangGraph ReAct architecture** — agent reasons step-by-step, calling retrieval tools before answering
-- **HyDE query rewriting** — generates a hypothetical answer to improve dense retrieval recall
-- **Hybrid BM25 + dense retrieval** — `EnsembleRetriever` (weights 0.4 / 0.6) merges keyword and semantic results
-- **Cross-encoder reranking** — `cross-encoder/ms-marco-MiniLM-L-6-v2` reranks 20 candidates to top-6
-- **Multilingual embeddings** — `paraphrase-multilingual-MiniLM-L12-v2` (384-dim, 50+ languages); zero index change needed when swapping languages
-- **20-turn session memory** — conversation history persisted in Redis per session with 1-hour TTL
-- **Per-session rate limiting** — 30 requests/minute per session ID via slowapi
-- **Prompt injection guardrails** — regex-based detection blocks common injection patterns before the LLM is called
-- **RAGAS evaluation** — async answer relevancy, faithfulness, and context recall scored after every response
-- **SSE streaming** — responses stream token-by-token to the frontend via Server-Sent Events
-- **`ai_agent` job type** — submit long-running AI tasks to the queue; gets retries, priority, and dead-letter for free
+### AI Capabilities
+- Zero-shot ticket classification — category, priority, tier, SLA hours, effort estimate, tags
+- Workload recommendation engine — analyses queue state and generates 4 prioritised actions
+- Streaming bot — DeepSeek R1 responses stream token-by-token via Server-Sent Events
+- Knowledge base RAG — ChromaDB with ONNX MiniLM embeddings; 10 pre-loaded IT runbooks
+- Session memory — Redis-backed conversation history per bot session
+- Rate limiting — 30 requests/minute per client
+- Prompt injection detection — regex-based guardrails applied before every LLM call
+- SLA tracking — breach risk scoring (ok / warning / at_risk / breached) computed in real time
+- Demo simulator — generates up to 50 realistic classified tickets to demonstrate queue flood behaviour
 
 ---
 
@@ -79,699 +88,329 @@ A production-grade distributed task queue built with **Go**, **Redis**, **React*
 ```
 .
 ├── cmd/
-│   ├── api/main.go              # API server entrypoint
-│   └── worker/main.go           # Worker pool entrypoint (registers job handlers + ai_agent)
+│   ├── api/main.go               # API server entry point
+│   └── worker/main.go            # Worker pool entry point; registers all job handlers
 ├── internal/
-│   ├── ai/
-│   │   └── claude_client.go     # Anthropic Claude HTTP client (used by ai_agent worker)
 │   ├── api/
-│   │   ├── handler.go           # HTTP handlers (submit, get, list-dead, retry, stats, health)
-│   │   └── router.go            # Gin route registration
+│   │   ├── handler.go            # HTTP handlers (submit, get, list, dead-letter, retry, stats)
+│   │   └── router.go             # Gin route registration
 │   ├── queue/
-│   │   ├── job.go               # Job model, status constants, priority levels
-│   │   ├── queue.go             # Queue interface
-│   │   └── redis_queue.go       # Redis-backed implementation
+│   │   ├── job.go                # Job model, status constants, priority levels
+│   │   ├── queue.go              # Queue interface
+│   │   └── redis_queue.go        # Redis implementation (sorted set + hash + list)
 │   └── worker/
-│       ├── worker.go            # Single worker — polls queue, dispatches handlers
-│       └── pool.go              # Worker pool + stale-job sweeper goroutine
+│       ├── worker.go             # Single worker goroutine
+│       └── pool.go               # Pool manager and stale-job sweeper
 ├── rag/
-│   ├── main.py                  # FastAPI app — /api/rag/chat (SSE), /ingest, /evaluate
-│   ├── agent.py                 # LangGraph ReAct agent + HyDE query expansion
-│   ├── retriever.py             # Hybrid BM25 + ChromaDB + cross-encoder reranking
-│   ├── memory.py                # Redis-backed 20-turn session memory
-│   ├── evaluation.py            # Async RAGAS evaluation (relevancy, faithfulness, recall)
-│   ├── guardrails.py            # Regex prompt-injection detection
-│   ├── rate_limiter.py          # Per-session rate limiting (slowapi)
+│   ├── main.py                   # FastAPI app; all /api/ai/* endpoints
+│   ├── classifier.py             # Ticket classification via OpenRouter
+│   ├── recommender.py            # Workload analysis and recommendations
+│   ├── bot.py                    # Streaming AI assistant with RAG context injection
+│   ├── knowledge.py              # ChromaDB knowledge base; 10 IT runbooks
+│   ├── sla.py                    # SLA breach risk calculator
+│   ├── simulator.py              # Demo ticket flood generator
+│   ├── memory.py                 # Redis-backed bot session memory
+│   ├── guardrails.py             # Prompt injection detection
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx              # Tab layout — Queue / RAG Chat / Dead Letter
-│   │   ├── App.css              # Dark-theme design system
-│   │   ├── api/
-│   │   │   ├── queue.js         # Go API client
-│   │   │   └── rag.js           # RAG service client (SSE streaming)
+│   │   ├── App.jsx               # Tab layout — Ticket Inbox / Queue Health / AI Bot
+│   │   ├── App.css               # Dark-theme design system
+│   │   ├── api/index.js          # Unified API client (queue + AI endpoints + SSE)
 │   │   └── components/
-│   │       ├── QueueStats.jsx   # Live-polling stats cards
-│   │       ├── JobSubmit.jsx    # Job submission form
-│   │       ├── JobList.jsx      # Job lookup by ID
-│   │       ├── RAGChat.jsx      # Streaming chat + ingest + RAGAS score bars
-│   │       └── DeadLetterPanel.jsx # Dead-letter inspector + AI analysis
-│   ├── nginx.conf               # Reverse proxy — SPA routing + API forwarding
-│   ├── Dockerfile               # Multi-stage: node build → nginx serve
-│   ├── package.json
+│   │       ├── TicketInbox.jsx   # Ticket submission with AI classification
+│   │       ├── QueueHealth.jsx   # Stats, SLA risk table, AI recommendations
+│   │       └── AIBot.jsx         # Streaming chat with ticket context
+│   ├── nginx.conf                # Reverse proxy for SPA routing and API forwarding
+│   ├── Dockerfile                # Multi-stage: Vite build then nginx serve
 │   └── vite.config.js
+├── infra/
+│   ├── helm/dtq/                 # Helm chart for all services
+│   ├── terraform/                # EKS cluster, VPC, ECR, IAM
+│   └── argocd/                   # GitOps application manifests
 ├── Dockerfile.api
 ├── Dockerfile.worker
+├── Dockerfile.huggingface        # Single-container build for HuggingFace Spaces
 ├── docker-compose.yml
+├── supervisord.hf.conf           # Supervisord config for HuggingFace deployment
 └── go.mod
 ```
 
 ---
 
-## Quick Start
+## Running Locally
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose v2)
-- An [Anthropic API key](https://console.anthropic.com/) for `ai_agent` jobs and the RAG service
+- Docker Desktop (includes Docker Compose v2)
+- A free OpenRouter API key — sign up at https://openrouter.ai, go to Keys, and create one
 
-### Run the stack
+### Steps
 
 ```bash
-git clone <repo-url>
-cd distributed-task-queue
-export ANTHROPIC_API_KEY=sk-ant-...
-docker compose up --build
+git clone https://github.com/apatha32/DTQ.git
+cd DTQ
 ```
 
-> **First build note:** the RAG image pre-downloads the embedding model (~450 MB) and cross-encoder (~100 MB) so the container starts fast on subsequent runs.
+Add your API key to the `.env` file:
 
-Services start in dependency order: Redis → ChromaDB → API → Worker replicas + RAG → Frontend.
+```
+OPENROUTER_API_KEY=sk-or-v1-your-key-here
+```
+
+Build and start all services:
+
+```bash
+docker compose up --build -d
+```
+
+Services start in dependency order: Redis and ChromaDB first, then API and workers, then the AI service, then the frontend.
 
 | Service | URL |
 |---|---|
-| **Frontend (React)** | http://localhost:80 |
-| REST API | http://localhost:8080 |
-| RAG Service | http://localhost:8000 |
+| Frontend (React) | http://localhost:3001 |
+| Go API | http://localhost:8080 |
+| AI Service (FastAPI) | http://localhost:8000 |
 | ChromaDB | http://localhost:8001 |
 | Redis | localhost:6379 |
 
-```bash
-docker compose down       # stop
-docker compose down -v    # stop + wipe volumes
+---
+
+## Testing the Application
+
+### 1. Submit and classify a ticket
+
+Open http://localhost:3001 and go to the **Ticket Inbox** tab.
+
+Enter a description such as:
+```
+Production database is down. All users are getting 500 errors on login.
 ```
 
-### Local development (without Docker)
+Click **AI Classify**. The system calls LLaMA 3.3 70B via OpenRouter and returns a classification within a few seconds. Expected output:
 
-```bash
-# Terminal 1 — Go API
-REDIS_ADDR=localhost:6379 go run ./cmd/api
-
-# Terminal 2 — Go Worker
-REDIS_ADDR=localhost:6379 ANTHROPIC_API_KEY=sk-ant-... go run ./cmd/worker
-
-# Terminal 3 — RAG service
-cd rag && pip install -r requirements.txt
-REDIS_ADDR=localhost:6379 ANTHROPIC_API_KEY=sk-ant-... uvicorn main:app --port 8000
-
-# Terminal 4 — React frontend (Vite proxy routes /api/* to local services)
-cd frontend && npm install && npm run dev
 ```
+Priority: P1    Category: outage    Tier: engineering
+SLA: 1 hour     Estimated effort: 30 min
+Tags: database, production, 500-error
+```
+
+Click **Submit to Queue** to enqueue the ticket as a `support_ticket` job.
 
 ---
 
-## REST API
+### 2. Simulate a ticket flood
 
-### `POST /api/v1/jobs` — Submit a job
-
-```bash
-curl -X POST http://localhost:8080/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "email",
-    "payload": {"to": "user@example.com", "subject": "Hello"},
-    "priority": 1,
-    "max_retries": 3
-  }'
-```
-
-**Built-in job types**
-
-| Type | Description |
-|---|---|
-| `email` | Simulated email send |
-| `image_resize` | Simulated image resize (20% failure rate to exercise retries) |
-| `report` | Simulated report generation |
-| `ai_agent` | Calls Anthropic Claude with `payload.task`; requires `ANTHROPIC_API_KEY` |
-
-**`ai_agent` example**
-
-```bash
-curl -X POST http://localhost:8080/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "ai_agent",
-    "payload": {"task": "Summarize the key benefits of distributed task queues"},
-    "priority": 1
-  }'
-```
-
-**Request fields**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `type` | string | ✓ | Must match a registered handler |
-| `payload` | object | | Arbitrary JSON passed to the handler |
-| `priority` | int | | `1` High, `2` Medium (default), `3` Low |
-| `max_retries` | int | | Default `3` |
-
-**Response** `201 Created` — full `Job` object.
+On the same tab, set the count to `20` and click **Simulate 20 Tickets**. This submits 20 pre-defined IT support tickets across all categories and priorities. Each ticket is classified before submission.
 
 ---
 
-### `GET /api/v1/jobs/:id` — Get job status
+### 3. Check queue health and get AI recommendations
 
-```bash
-curl http://localhost:8080/api/v1/jobs/<id>
-```
+Go to the **Queue Health** tab.
 
-Returns the full job object. Status: `pending` | `processing` | `completed` | `failed` | `dead`.
+The stats row updates every 5 seconds. The SLA risk table shows any tickets at risk of breaching their deadline.
 
----
-
-### `GET /api/v1/jobs/dead` — List dead-letter jobs
-
-```bash
-curl http://localhost:8080/api/v1/jobs/dead
-```
-
-Returns up to 50 dead-letter jobs (newest first) as a JSON array.
+Click **Analyse Queue** to send the current queue state to the recommendation engine. The AI returns:
+- A health score (0-100)
+- A summary of the current situation
+- Up to 4 prioritised actions (escalate / batch / defer / reassign / alert)
 
 ---
 
-### `POST /api/v1/jobs/:id/retry` — Retry a dead-letter job
+### 4. Use the AI bot to resolve a ticket
 
-```bash
-curl -X POST http://localhost:8080/api/v1/jobs/<id>/retry
+Go to the **AI Bot** tab.
+
+Select a ticket from the dropdown. The bot receives the ticket details plus relevant excerpts from the IT runbook knowledge base.
+
+Ask a question such as:
+```
+What are the immediate steps I should take to diagnose this database outage?
 ```
 
-Resets `retries` to `0`, clears the error, and re-enqueues the job.
+The response streams in real time using Server-Sent Events. The bot maintains conversation history for the session.
 
 ---
 
-### `GET /api/v1/stats` — Queue counters
+### 5. Verify via the REST API directly
 
-```json
-{
-  "pending_count": 4,
-  "processing_count": 2,
-  "completed_count": 137,
-  "failed_count": 12,
-  "dead_count": 1
-}
-```
-
----
-
-### `GET /health` — Liveness probe
-
-```bash
-curl http://localhost:8080/health
-# {"status":"ok"}
-```
-
----
-
-## RAG Service API
-
-### `POST /api/rag/chat` — Streaming chat (SSE)
-
-```bash
-curl -N -X POST http://localhost:8000/api/rag/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What is a dead-letter queue?", "session_id": "abc123"}'
-```
-
-Streams `event: message` frames (JSON `{"chunk": "...", "session_id": "..."}`) followed by a single `event: done` frame. A new `session_id` is returned if none was provided.
-
----
-
-### `POST /api/rag/ingest` — Add documents to the knowledge base
-
-```bash
-curl -X POST http://localhost:8000/api/rag/ingest \
-  -H "Content-Type: application/json" \
-  -d '{"documents": ["A dead-letter queue stores jobs that failed all retry attempts..."]}'
-```
-
-Documents are embedded with `paraphrase-multilingual-MiniLM-L12-v2`, stored in ChromaDB, and added to the in-memory BM25 corpus.
-
----
-
-### `GET /api/rag/evaluate/:session_id` — RAGAS scores
-
-```bash
-curl http://localhost:8000/api/rag/evaluate/abc123
-```
-
-```json
-{
-  "answer_relevancy": 0.9341,
-  "faithfulness": 0.8812,
-  "context_recall": 0.9105,
-  "question": "What is a dead-letter queue?"
-}
-```
-
-Scores are computed asynchronously after each response and cached in Redis for 1 hour.
-
----
-
-## Job Lifecycle
-
-```
-                ┌─────────┐
-    submit ────▶│ pending │
-                └────┬────┘
-                     │ dequeue
-                ┌────▼──────────┐
-                │  processing   │◀──── sweeper rescues stale jobs
-                └────┬──────────┘
-           ┌─────────┴──────────┐
-        success              failure
-           │                    │
-      ┌────▼─────┐        retries left?
-      │completed │         yes │       no
-      └──────────┘     ┌───▼────┐   ┌──────┐
-                        │ failed │   │ dead │
-                        │(retry) │   └──┬───┘
-                        └────────┘      │
-                                  POST /retry
-                                        │
-                                   ▼ pending
-```
-
----
-
-## Configuration
-
-### API
-
-| Variable | Default | Description |
-|---|---|---|
-| `REDIS_ADDR` | `localhost:6379` | Redis address |
-| `PORT` | `8080` | HTTP listen port |
-
-### Worker
-
-| Variable | Default | Description |
-|---|---|---|
-| `REDIS_ADDR` | `localhost:6379` | Redis address |
-| `WORKER_POOL_SIZE` | `5` | Concurrent goroutines per replica |
-| `ANTHROPIC_API_KEY` | — | Required for `ai_agent` jobs |
-
-### RAG Service
-
-| Variable | Default | Description |
-|---|---|---|
-| `REDIS_ADDR` | `localhost:6379` | Redis address (session memory + eval cache) |
-| `ANTHROPIC_API_KEY` | — | Required for LLM completions and RAGAS evaluation |
-| `CHROMA_HOST` | `localhost` | ChromaDB host |
-| `CHROMA_PORT` | `8001` | ChromaDB port |
-
----
-
-## Scaling Workers
-
-```bash
-docker compose up -d --scale worker=4
-```
-
-Adjust goroutines per replica via `WORKER_POOL_SIZE` in `docker-compose.yml`.
-
----
-
-## Adding a New Job Type
-
-1. Register a handler in `cmd/worker/main.go`:
-
-```go
-handlers["transcode"] = func(ctx context.Context, job *queue.Job) error {
-    // access job.Payload["input_url"] etc.
-    return nil
-}
-```
-
-2. Submit jobs with `"type": "transcode"` via the API or the React frontend.
-
----
-
-## Redis Data Model
-
-| Key | Type | Contents |
-|---|---|---|
-| `queue:pending` | Sorted Set | Job IDs scored by `priority × 10¹⁰ + unix_ms` |
-| `queue:processing` | Hash | `jobID → enqueue_timestamp_ms` |
-| `queue:dead` | List | Dead job IDs (newest first) |
-| `job:<id>` | String | JSON-serialised `Job` struct |
-| `stats:completed` | String | Running completed counter |
-| `stats:failed` | String | Running failed counter |
-| `stats:dead` | String | Running dead counter |
-| `rag:session:<id>:history` | List | Up to 20 turns of chat history (TTL 1h) |
-| `rag:eval:<id>` | String | JSON RAGAS scores for session (TTL 1h) |
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| API framework | [Gin](https://github.com/gin-gonic/gin) v1.10 |
-| Redis client (Go) | [go-redis](https://github.com/redis/go-redis) v9 |
-| ID generation | [google/uuid](https://github.com/google/uuid) v1.6 |
-| LLM (worker + RAG) | [Anthropic Claude](https://www.anthropic.com/) (`claude-sonnet-4-20250514`) |
-| RAG framework | [LangGraph](https://github.com/langchain-ai/langgraph) + [LangChain](https://github.com/langchain-ai/langchain) |
-| Embeddings | `paraphrase-multilingual-MiniLM-L12-v2` (sentence-transformers) |
-| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` |
-| Vector store | [ChromaDB](https://www.trychroma.com/) |
-| RAG evaluation | [RAGAS](https://docs.ragas.io/) |
-| RAG API | [FastAPI](https://fastapi.tiangolo.com/) + sse-starlette |
-| Frontend | [React](https://react.dev/) 18 + [Vite](https://vitejs.dev/) 6 |
-| Frontend serving | nginx (multi-stage Docker build) |
-| Container runtime | Docker + Docker Compose v2 |
-| Go version | 1.22 |
-
----
-
-## Architecture
-
-```
-┌─────────────┐    HTTP     ┌──────────────┐    Redis     ┌──────────────────┐
-│   Client    │ ──────────▶ │   API (Gin)  │ ──────────▶  │  Redis (Sorted   │
-│             │             │  :8080       │              │  Set + Hash)     │
-└─────────────┘             └──────────────┘              └────────┬─────────┘
-                                                                   │
-                            ┌──────────────┐                       │ poll
-                            │  Dashboard   │ ◀─────────────────────┤
-                            │  (Streamlit) │                       │
-                            │  :8501       │              ┌────────▼─────────┐
-                            └──────────────┘              │  Worker Pool     │
-                                                          │  (2 replicas ×   │
-                                                          │   5 goroutines)  │
-                                                          └──────────────────┘
-```
-
-### Components
-
-| Service | Language | Role |
-|---|---|---|
-| **API** | Go / Gin | Accepts jobs, exposes status & stats endpoints |
-| **Worker** | Go | Pool of goroutines that dequeue and process jobs |
-| **Redis** | Redis 7 | Priority queue (sorted set), processing tracker (hash), dead-letter (list) |
-| **Dashboard** | Python / Streamlit | Live monitoring UI — submit jobs, view metrics, inspect dead-letter queue |
-
----
-
-## Features
-
-- **Priority scheduling** — three levels (High / Medium / Low); jobs sorted by priority then FIFO within the same level
-- **Automatic retries** — configurable `max_retries` per job; failed jobs are re-enqueued with a back-off penalty score
-- **Dead-letter queue** — jobs that exhaust all retries are parked in a dead-letter list with their last error
-- **API retry** — dead-letter jobs can be re-enqueued via a single API call, resetting retries to zero
-- **Stale job recovery** — a background sweeper re-enqueues jobs stuck in `processing` for > 5 minutes (handles crashed workers)
-- **Per-job timeout** — each handler is given a 30-second context deadline; hung jobs are automatically failed
-- **Health check** — `GET /health` endpoint wired into Docker Compose `depends_on` so workers/dashboard only start once the API is ready
-- **Horizontal scaling** — worker replicas are controlled by a single `WORKER_POOL_SIZE` env var; Compose runs 2 replicas out of the box
-
----
-
-## Project Structure
-
-```
-.
-├── cmd/
-│   ├── api/main.go           # API server entrypoint
-│   └── worker/main.go        # Worker pool entrypoint (registers job handlers)
-├── internal/
-│   ├── api/
-│   │   ├── handler.go        # HTTP handlers (submit, get, retry, stats, health)
-│   │   └── router.go         # Gin route registration
-│   ├── queue/
-│   │   ├── job.go            # Job model, status constants, priority levels
-│   │   ├── queue.go          # Queue interface
-│   │   └── redis_queue.go    # Redis-backed implementation
-│   └── worker/
-│       ├── worker.go         # Single worker — polls queue, dispatches handlers
-│       └── pool.go           # Worker pool + stale-job sweeper goroutine
-├── dashboard/
-│   ├── app.py                # Streamlit dashboard
-│   ├── Dockerfile
-│   └── requirements.txt
-├── Dockerfile.api
-├── Dockerfile.worker
-├── docker-compose.yml
-└── go.mod
-```
-
----
-
-## Quick Start
-
-### Prerequisites
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (includes Docker Compose v2)
-
-### Run the stack
-
-```bash
-git clone <repo-url>
-cd distributed-task-queue
-docker compose up --build
-```
-
-All four services start automatically in the correct order (Redis → API → Workers + Dashboard).
-
-| Service | URL |
-|---|---|
-| REST API | http://localhost:8080 |
-| Dashboard | http://localhost:8501 |
-| Redis | localhost:6379 |
-
-To stop and remove containers:
-
-```bash
-docker compose down
-```
-
-To wipe the Redis volume as well:
-
-```bash
-docker compose down -v
-```
-
----
-
-## REST API
-
-### `POST /api/v1/jobs` — Submit a job
-
-```bash
-curl -X POST http://localhost:8080/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "email",
-    "payload": {"to": "user@example.com", "subject": "Hello"},
-    "priority": 1,
-    "max_retries": 3
-  }'
-```
-
-**Request body**
-
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `type` | string | ✓ | Job type — must match a registered handler (`email`, `image_resize`, `report`) |
-| `payload` | object | | Arbitrary JSON passed to the handler |
-| `priority` | int | | `1` = High, `2` = Medium (default), `3` = Low |
-| `max_retries` | int | | Max retry attempts before dead-lettering (default `3`) |
-
-**Response** `201 Created`
-
-```json
-{
-  "id": "de0316c7-d4f8-4cbf-bc26-06869af44ad9",
-  "type": "email",
-  "payload": {"to": "user@example.com", "subject": "Hello"},
-  "priority": 1,
-  "status": "pending",
-  "retries": 0,
-  "max_retries": 3,
-  "created_at": "2026-05-19T00:04:18.963577345Z",
-  "updated_at": "2026-05-19T00:04:18.963577345Z"
-}
-```
-
----
-
-### `GET /api/v1/jobs/:id` — Get job status
-
-```bash
-curl http://localhost:8080/api/v1/jobs/de0316c7-d4f8-4cbf-bc26-06869af44ad9
-```
-
-Returns the full job object. Status will be one of: `pending`, `processing`, `completed`, `failed`, `dead`.
-
-**Errors**
-
-| Code | Meaning |
-|---|---|
-| `404` | Job ID does not exist |
-
----
-
-### `POST /api/v1/jobs/:id/retry` — Retry a dead-letter job
-
-```bash
-curl -X POST http://localhost:8080/api/v1/jobs/<id>/retry
-```
-
-Removes the job from the dead-letter list, resets `retries` to `0`, clears the error, and re-enqueues it. Returns the updated job object.
-
-**Errors**
-
-| Code | Meaning |
-|---|---|
-| `400` | Job exists but is not in `dead` status |
-| `404` | Job ID does not exist |
-
----
-
-### `GET /api/v1/stats` — Queue counters
-
+Check queue stats:
 ```bash
 curl http://localhost:8080/api/v1/stats
 ```
 
-```json
-{
-  "pending_count": 4,
-  "processing_count": 2,
-  "completed_count": 137,
-  "failed_count": 12,
-  "dead_count": 1
-}
+List pending jobs:
+```bash
+curl http://localhost:8080/api/v1/jobs
+```
+
+Submit a job manually:
+```bash
+curl -X POST http://localhost:8080/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "support_ticket",
+    "priority": 1,
+    "max_retries": 3,
+    "payload": {
+      "text": "VPN is not connecting for remote employees",
+      "category": "access",
+      "tier": "tier1",
+      "sla_hours": 4,
+      "estimated_minutes": 20,
+      "summary": "VPN connectivity issue affecting remote workers"
+    }
+  }'
+```
+
+Check a job by ID:
+```bash
+curl http://localhost:8080/api/v1/jobs/<id>
+```
+
+List dead-letter jobs:
+```bash
+curl http://localhost:8080/api/v1/jobs/dead
+```
+
+Retry a dead-letter job:
+```bash
+curl -X POST http://localhost:8080/api/v1/jobs/<id>/retry
+```
+
+Classify a ticket via AI:
+```bash
+curl -X POST http://localhost:8000/api/ai/classify \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Cannot access email, getting authentication error", "customer_tier": "enterprise"}'
+```
+
+Get queue recommendations:
+```bash
+curl -X POST http://localhost:8000/api/ai/recommend \
+  -H "Content-Type: application/json" \
+  -d '{"queue_stats": {"pending_count": 15, "processing_count": 3, "dead_count": 2}}'
 ```
 
 ---
 
-### `GET /health` — Liveness probe
+## REST API Reference
 
-```bash
-curl http://localhost:8080/health
-# {"status":"ok"}
-```
+### Queue Endpoints (Go API — port 8080)
 
-Used by Docker Compose healthcheck; returns `200` as soon as the server is ready.
+| Method | Path | Description |
+|---|---|---|
+| POST | /api/v1/jobs | Submit a new job |
+| GET | /api/v1/jobs | List pending jobs (up to 100) |
+| GET | /api/v1/jobs/:id | Get a job by ID |
+| GET | /api/v1/jobs/dead | List dead-letter jobs (up to 50) |
+| POST | /api/v1/jobs/:id/retry | Re-enqueue a dead-letter job |
+| GET | /api/v1/stats | Queue counters |
+| GET | /health | Liveness probe |
+
+### AI Endpoints (FastAPI — port 8000)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | /api/ai/classify | Classify a ticket (category, priority, SLA, tier, tags) |
+| POST | /api/ai/recommend | Analyse queue state and return recommendations |
+| POST | /api/ai/bot/chat | Streaming chat (SSE) |
+| POST | /api/ai/bot/clear | Clear session history |
+| POST | /api/ai/simulate | Submit N demo tickets |
+| POST | /api/ai/sla-check | Compute SLA breach risk for a list of jobs |
+| GET | /health | Liveness probe |
 
 ---
 
 ## Job Lifecycle
 
 ```
-                ┌─────────┐
-    submit ────▶│ pending │
-                └────┬────┘
-                     │ dequeue
-                ┌────▼──────────┐
-                │  processing   │◀──── sweeper rescues stale jobs
-                └────┬──────────┘
-           ┌─────────┴──────────┐
-        success              failure
-           │                    │
-      ┌────▼─────┐        retries left?
-      │completed │         yes │       no
-      └──────────┘     ┌───▼────┐   ┌──────┐
-                        │ failed │   │ dead │
-                        │(retry) │   └──┬───┘
-                        └────────┘      │
-                                  POST /retry
-                                        │
-                                   ▼ pending
+submit
+  |
+  v
+pending  -->  processing  -->  completed
+                  |
+                  | failure
+                  v
+              failed (retries left)  -->  re-enqueued
+                  |
+                  | retries exhausted
+                  v
+                dead  -->  POST /retry  -->  pending
 ```
+
+A background sweeper runs every 30 seconds and re-enqueues any jobs that have been in `processing` for more than 5 minutes, handling crashed workers.
 
 ---
 
-## Configuration
+## Configuration Reference
 
-All configuration is via environment variables.
-
-### API
+### API Server
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_ADDR` | `localhost:6379` | Redis address |
-| `PORT` | `8080` | HTTP listen port |
+| REDIS_ADDR | localhost:6379 | Redis connection address |
+| PORT | 8080 | HTTP listen port |
 
 ### Worker
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_ADDR` | `localhost:6379` | Redis address |
-| `WORKER_POOL_SIZE` | `5` | Number of concurrent worker goroutines per replica |
+| REDIS_ADDR | localhost:6379 | Redis connection address |
+| WORKER_POOL_SIZE | 5 | Concurrent goroutines per replica |
 
-### Dashboard
+### AI Service
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_URL` | `http://localhost:8080` | Base URL of the API service |
-| `REDIS_ADDR` | `localhost:6379` | Redis address (used for in-flight job inspection) |
+| REDIS_ADDR | localhost:6379 | Redis connection address |
+| OPENROUTER_API_KEY | — | Required for all AI features |
+| CHROMA_HOST | localhost | ChromaDB hostname |
+| CHROMA_PORT | 8000 | ChromaDB port (internal) |
 
 ---
 
-## Scaling Workers
-
-To increase worker replicas at runtime:
+## Scaling
 
 ```bash
+# Run 4 worker replicas
 docker compose up -d --scale worker=4
+
+# Increase goroutines per replica
+# Set WORKER_POOL_SIZE=10 in docker-compose.yml
 ```
 
-To adjust goroutines per replica, set `WORKER_POOL_SIZE` in `docker-compose.yml`.
+The Kubernetes manifests in `infra/helm/` include a HorizontalPodAutoscaler for the worker deployment, configured to scale based on Redis queue depth via the Prometheus Adapter.
 
 ---
 
 ## Adding a New Job Type
 
-1. Register a handler in `cmd/worker/main.go`:
+Register a handler in `cmd/worker/main.go`:
 
 ```go
-handlers["transcode"] = func(ctx context.Context, job *queue.Job) error {
-    // access job.Payload["input_url"] etc.
-    return nil
+handlers["send_sms"] = func(ctx context.Context, job *queue.Job) error {
+    phone, _ := job.Payload["phone"].(string)
+    message, _ := job.Payload["message"].(string)
+    return sendSMS(ctx, phone, message)
 }
 ```
 
-2. Submit jobs with `"type": "transcode"` via the API.
+Submit jobs of that type via the API:
 
-That's it — no schema changes, no restarts of the API or Redis.
-
----
-
-## Dashboard
-
-The Streamlit dashboard at **http://localhost:8501** provides:
-
-- **Live metrics** — pending / processing / completed / failed / dead counters
-- **Donut chart** — visual job distribution
-- **In-flight table** — currently processing jobs and how long they've been running
-- **Dead-letter table** — last 10 dead jobs with type, retry count, and error message
-- **Job submission form** — submit any job type with custom priority, retries, and JSON payload
-- **Auto-refresh** — re-queries the API and Redis every 5 seconds (toggle in sidebar)
+```bash
+curl -X POST http://localhost:8080/api/v1/jobs \
+  -H "Content-Type: application/json" \
+  -d '{"type": "send_sms", "payload": {"phone": "+1234567890", "message": "Your ticket has been resolved"}, "priority": 2}'
+```
 
 ---
 
-## Redis Data Model
+## Stopping the Stack
 
-| Key | Type | Contents |
-|---|---|---|
-| `queue:pending` | Sorted Set | Job IDs scored by `priority × 10¹⁰ + unix_ms` |
-| `queue:processing` | Hash | `jobID → enqueue_timestamp_ms` |
-| `queue:dead` | List | Dead job IDs (newest first) |
-| `job:<id>` | String | JSON-serialised `Job` struct |
-| `stats:completed` | String | Running completed counter |
-| `stats:failed` | String | Running failed counter |
-| `stats:dead` | String | Running dead counter |
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| API framework | [Gin](https://github.com/gin-gonic/gin) v1.10 |
-| Redis client | [go-redis](https://github.com/redis/go-redis) v9 |
-| ID generation | [google/uuid](https://github.com/google/uuid) v1.6 |
-| Dashboard | [Streamlit](https://streamlit.io/) + Plotly + Pandas |
-| Container runtime | Docker + Docker Compose v2 |
-| Go version | 1.22 |
+```bash
+docker compose down        # stop containers, keep volumes
+docker compose down -v     # stop containers and delete all data
+```
