@@ -66,6 +66,24 @@ func main() {
 			log.Printf("ai_agent job=%s response=%.120s...", job.ID, result)
 			return nil
 		},
+		"support_ticket": func(ctx context.Context, job *queue.Job) error {
+			category, _ := job.Payload["category"].(string)
+			summary, _ := job.Payload["summary"].(string)
+			tier, _ := job.Payload["tier"].(string)
+			estimatedMin, _ := job.Payload["estimated_minutes"].(float64)
+			if estimatedMin == 0 {
+				estimatedMin = 15
+			}
+			log.Printf("support_ticket job=%s category=%s tier=%s summary=%.80s",
+				job.ID, category, tier, summary)
+			// Simulate agent work — scale estimated_minutes down for demo speed
+			workDuration := time.Duration(estimatedMin*200) * time.Millisecond
+			if workDuration > 3*time.Second {
+				workDuration = 3 * time.Second
+			}
+			time.Sleep(workDuration)
+			return nil
+		},
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

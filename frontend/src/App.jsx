@@ -1,27 +1,25 @@
 import { useState } from 'react'
-import QueueStats from './components/QueueStats'
-import JobSubmit from './components/JobSubmit'
-import JobList from './components/JobList'
-import RAGChat from './components/RAGChat'
-import DeadLetterPanel from './components/DeadLetterPanel'
+import TicketInbox from './components/TicketInbox'
+import QueueHealth from './components/QueueHealth'
+import AIBot from './components/AIBot'
 import './App.css'
 
 const TABS = [
-  { id: 'queue', label: 'Queue' },
-  { id: 'rag', label: 'RAG Chat' },
-  { id: 'dlq', label: 'Dead Letter' },
+  { id: 'inbox',  label: '📥 Ticket Inbox' },
+  { id: 'health', label: '📊 Queue Health' },
+  { id: 'bot',    label: '🤖 AI Bot'        },
 ]
 
 export default function App() {
-  const [active, setActive] = useState('queue')
+  const [active, setActive] = useState('inbox')
 
   return (
     <div className="app">
       <header className="header">
         <div className="header-brand">
-          <span className="header-hex">⬡</span>
-          <span className="header-title">DTQ</span>
-          <span className="header-sub">Distributed Task Queue</span>
+          <span className="header-hex">⚡</span>
+          <span className="header-title">SmartQueue</span>
+          <span className="header-sub">AI Helpdesk Workload Optimizer</span>
         </div>
         <nav className="nav">
           {TABS.map(t => (
@@ -37,18 +35,11 @@ export default function App() {
       </header>
 
       <main className="main">
-        {active === 'queue' && (
-          <div className="page">
-            <QueueStats />
-            <div className="two-col">
-              <JobSubmit />
-              <JobList />
-            </div>
-          </div>
-        )}
-        {active === 'rag'  && <RAGChat />}
-        {active === 'dlq'  && <DeadLetterPanel />}
+        {active === 'inbox'  && <TicketInbox />}
+        {active === 'health' && <QueueHealth />}
+        {active === 'bot'    && <AIBot />}
       </main>
     </div>
   )
 }
+

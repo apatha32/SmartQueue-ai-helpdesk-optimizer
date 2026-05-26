@@ -28,4 +28,7 @@ type Queue interface {
 
 	// ListDeadJobs returns up to limit dead-letter jobs, newest first.
 	ListDeadJobs(ctx context.Context, limit int64) ([]*Job, error)
+
+	// ListPendingJobs returns up to limit pending jobs, highest priority first.
+	ListPendingJobs(ctx context.Context, limit int64) ([]*Job, error)
 }
