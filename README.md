@@ -1,3 +1,12 @@
+---
+title: SmartQueue AI Helpdesk Optimizer
+emoji: 🎫
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+---
+
 # SmartQueue — AI Helpdesk Workload Optimizer
 
 A production-grade distributed task queue built on Go, Redis, Python, and React, with an integrated AI layer that classifies support tickets, forecasts workload, and provides a real-time streaming assistant for resolving them. Designed to demonstrate how AI can be embedded into a real distributed system to solve a concrete business problem: managing support ticket floods on busy days.
