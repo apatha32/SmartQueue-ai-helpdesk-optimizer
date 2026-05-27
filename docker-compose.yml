@@ -71,6 +71,7 @@ services:
       - REDIS_ADDR=redis:6379
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - API_BASE=http://api:8080
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8000
     depends_on:

@@ -134,9 +134,9 @@ async def bot_clear(req: BotChatRequest):
 async def simulate(req: SimulateRequest):
     if not (1 <= req.count <= 50):
         raise HTTPException(status_code=400, detail="count must be 1–50")
-    if not os.getenv("OPENROUTER_API_KEY"):
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY not configured")
-    submitted = await simulate_tickets(req.count, req.api_base)
+    # Allow env var to override the api_base (needed for single-container deployments)
+    api_base = os.getenv("API_BASE") or req.api_base
+    submitted = await simulate_tickets(req.count, api_base)
     return {"submitted": len(submitted), "tickets": submitted}
 
 

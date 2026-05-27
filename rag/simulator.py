@@ -68,7 +68,7 @@ def _fallback_classify(text: str, customer_tier: str) -> dict:
     }
 
 
-async def simulate_tickets(count: int, api_base: str = "http://api:8080") -> list[dict]:
+async def simulate_tickets(count: int, api_base: str = "http://localhost:8080") -> list[dict]:
     """Classify and submit `count` realistic tickets to the Go API concurrently."""
     selected = random.choices(TICKET_POOL, k=min(count, len(TICKET_POOL) * 2))[:count]
 
