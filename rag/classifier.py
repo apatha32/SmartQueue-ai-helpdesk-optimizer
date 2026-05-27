@@ -5,7 +5,7 @@ from functools import lru_cache
 
 from openai import AsyncOpenAI
 
-_CLASSIFY_MODEL = os.getenv("CLASSIFY_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+_CLASSIFY_MODEL = os.getenv("CLASSIFY_MODEL", "llama-3.3-70b-versatile")
 
 _PROMPT = """\
 You are an IT helpdesk triage system. Classify the ticket below and respond with \
@@ -34,6 +34,14 @@ JSON schema (exactly this, no extra keys):
 
 @lru_cache(maxsize=1)
 def _llm() -> AsyncOpenAI:
+    # Prefer Groq (free tier, fast); fall back to OpenRouter if key provided
+    groq_key = os.getenv("GROQ_API_KEY", "")
+    if groq_key:
+        return AsyncOpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=groq_key,
+            max_retries=0,
+        )
     return AsyncOpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=os.getenv("OPENROUTER_API_KEY", ""),

@@ -4,7 +4,7 @@ import os
 
 from classifier import _llm  # reuse same OpenRouter client
 
-_RECOMMEND_MODEL = os.getenv("RECOMMEND_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+_RECOMMEND_MODEL = os.getenv("RECOMMEND_MODEL", "llama-3.3-70b-versatile")
 
 _PROMPT = """\
 You are an IT operations manager. Analyze the helpdesk queue state below and produce \
