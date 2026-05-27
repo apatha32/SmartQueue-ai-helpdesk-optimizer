@@ -22,8 +22,8 @@ Support teams face unpredictable ticket volume. SmartQueue addresses this with t
 | Worker pool | Go, goroutines | Concurrent job execution with retry and dead-letter logic |
 | Queue backend | Redis 7 (sorted set) | Priority queue, processing tracker, dead-letter list |
 | AI service | Python 3.12, FastAPI | Ticket classification, workload recommendations, streaming bot |
-| LLM provider | OpenRouter (free tier) | LLaMA 3.3 70B for classification/recommendations, DeepSeek R1 for bot |
-| Knowledge base | ChromaDB 0.5, ONNX embeddings | IT runbook retrieval for bot context injection |
+| LLM provider | Groq (free tier) | LLaMA 3.3 70B for classification, recommendations, and bot — with keyword fallback when unavailable |
+| Knowledge base | In-memory BM25 | 10 pre-loaded IT runbooks; pure-Python word-frequency ranking, no external DB |
 | Session memory | Redis | Per-session conversation history for the AI bot |
 | Frontend | React 18, Vite, nginx | Live dashboard — Ticket Inbox, Queue Health, AI Bot |
 | Infrastructure | Docker Compose | Local multi-service orchestration |
@@ -45,12 +45,12 @@ React Frontend (nginx :3001)
               +---------------+---------------+
               |               |               |
          Classifier      Recommender        Bot (SSE)
-         (LLaMA 3.3)     (LLaMA 3.3)    (DeepSeek R1)
+         (LLaMA 3.3)     (LLaMA 3.3)    (LLaMA 3.3)
               |               |               |
-              +--------> OpenRouter API <------+
+              +----------> Groq API <---------+
                               |
-                         ChromaDB
-                     (IT runbook vectors)
+                      In-memory BM25
+                     (IT runbook search)
 
 Go API Server <----> Redis <----> Go Worker Pool (2 replicas x 5 goroutines)
                                       |
@@ -73,8 +73,8 @@ Go API Server <----> Redis <----> Go Worker Pool (2 replicas x 5 goroutines)
 ### AI Capabilities
 - Zero-shot ticket classification — category, priority, tier, SLA hours, effort estimate, tags
 - Workload recommendation engine — analyses queue state and generates 4 prioritised actions
-- Streaming bot — DeepSeek R1 responses stream token-by-token via Server-Sent Events
-- Knowledge base RAG — ChromaDB with ONNX MiniLM embeddings; 10 pre-loaded IT runbooks
+- Streaming bot — LLaMA 3.3 70B responses stream token-by-token via Server-Sent Events
+- Knowledge base RAG — in-memory BM25 search across 10 pre-loaded IT runbooks; no external vector DB required
 - Session memory — Redis-backed conversation history per bot session
 - Rate limiting — 30 requests/minute per client
 - Prompt injection detection — regex-based guardrails applied before every LLM call
@@ -103,10 +103,10 @@ Go API Server <----> Redis <----> Go Worker Pool (2 replicas x 5 goroutines)
 │       └── pool.go               # Pool manager and stale-job sweeper
 ├── rag/
 │   ├── main.py                   # FastAPI app; all /api/ai/* endpoints
-│   ├── classifier.py             # Ticket classification via OpenRouter
-│   ├── recommender.py            # Workload analysis and recommendations
-│   ├── bot.py                    # Streaming AI assistant with RAG context injection
-│   ├── knowledge.py              # ChromaDB knowledge base; 10 IT runbooks
+    ├── classifier.py             # Ticket classification via Groq (LLaMA 3.3 70B) with keyword fallback
+    ├── recommender.py            # Workload analysis and recommendations with rule-based fallback
+    ├── bot.py                    # Streaming AI assistant with BM25 runbook context injection
+    ├── knowledge.py              # In-memory BM25 knowledge base; 10 IT runbooks
 │   ├── sla.py                    # SLA breach risk calculator
 │   ├── simulator.py              # Demo ticket flood generator
 │   ├── memory.py                 # Redis-backed bot session memory
@@ -144,19 +144,19 @@ Go API Server <----> Redis <----> Go Worker Pool (2 replicas x 5 goroutines)
 ### Prerequisites
 
 - Docker Desktop (includes Docker Compose v2)
-- A free OpenRouter API key — sign up at https://openrouter.ai, go to Keys, and create one
+- A free Groq API key — sign up at https://console.groq.com, go to **API Keys**, and create one
 
 ### Steps
 
 ```bash
-git clone https://github.com/apatha32/DTQ.git
-cd DTQ
+git clone https://github.com/apatha32/SmartQueue-ai-helpdesk-optimizer.git
+cd SmartQueue-ai-helpdesk-optimizer
 ```
 
 Add your API key to the `.env` file:
 
 ```
-OPENROUTER_API_KEY=sk-or-v1-your-key-here
+GROQ_API_KEY=gsk_your-key-here
 ```
 
 Build and start all services:
@@ -165,15 +165,13 @@ Build and start all services:
 docker compose up --build -d
 ```
 
-Services start in dependency order: Redis and ChromaDB first, then API and workers, then the AI service, then the frontend.
+Services start in dependency order: Redis first, then API and workers, then the AI service, then the frontend.
 
 | Service | URL |
 |---|---|
 | Frontend (React) | http://localhost:3001 |
 | Go API | http://localhost:8080 |
 | AI Service (FastAPI) | http://localhost:8000 |
-| ChromaDB | http://localhost:8001 |
-| Redis | localhost:6379 |
 
 ---
 
@@ -188,7 +186,7 @@ Enter a description such as:
 Production database is down. All users are getting 500 errors on login.
 ```
 
-Click **AI Classify**. The system calls LLaMA 3.3 70B via OpenRouter and returns a classification within a few seconds. Expected output:
+Click **AI Classify**. The system calls LLaMA 3.3 70B via Groq and returns a classification within ~1-2 seconds. Expected output:
 
 ```
 Priority: P1    Category: outage    Tier: engineering
@@ -366,9 +364,8 @@ A background sweeper runs every 30 seconds and re-enqueues any jobs that have be
 | Variable | Default | Description |
 |---|---|---|
 | REDIS_ADDR | localhost:6379 | Redis connection address |
-| OPENROUTER_API_KEY | — | Required for all AI features |
-| CHROMA_HOST | localhost | ChromaDB hostname |
-| CHROMA_PORT | 8000 | ChromaDB port (internal) |
+| GROQ_API_KEY | — | Required for LLM features (Groq free tier) |
+| OPENROUTER_API_KEY | — | Optional fallback if GROQ_API_KEY is not set |
 
 ---
 
