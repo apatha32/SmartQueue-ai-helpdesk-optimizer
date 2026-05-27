@@ -1,6 +1,5 @@
 ---
 title: SmartQueue AI Helpdesk Optimizer
-emoji: 🎫
 colorFrom: blue
 colorTo: purple
 sdk: docker
@@ -9,7 +8,236 @@ pinned: false
 
 # SmartQueue — AI Helpdesk Workload Optimizer
 
-A production-grade distributed task queue built on Go, Redis, Python, and React, with an integrated AI layer that classifies support tickets, forecasts workload, and provides a real-time streaming assistant for resolving them. Designed to demonstrate how AI can be embedded into a real distributed system to solve a concrete business problem: managing support ticket floods on busy days.
+A production-grade distributed task queue built on Go, Redis, Python, and React, with an integrated AI layer that classifies support tickets, forecasts workload, and provides a real-time streaming assistant for resolving them.
+
+---
+
+## What It Does
+
+Support teams face unpredictable ticket volume. SmartQueue addresses this with three capabilities:
+
+- **Ticket classification** — incoming support requests are automatically categorised, prioritised (P1–P4), assigned an SLA deadline, and routed to the correct team tier using a large language model.
+- **Queue health and recommendations** — the system monitors queue state and generates actionable recommendations (escalate, batch, defer, reassign) when workload patterns indicate risk.
+- **AI worker assistant** — agents can open a chat with an AI assistant that has access to the ticket context and a knowledge base of IT runbooks, with responses streamed token-by-token.
+
+---
+
+## Technical Stack
+
+Go 1.22, Gin, Python 3.12, FastAPI, Redis 7, React 18, Vite, nginx, Docker Compose, Groq (LLaMA 3.3 70B), Kubernetes, Helm, Terraform (EKS), ArgoCD, Prometheus
+
+---
+
+## Architecture
+
+```
+Browser
+  |
+  | HTTP / SSE
+  v
+React Frontend (nginx :3001)
+  |--- /api/v1/*  ---> Go API Server (:8080)
+  |--- /api/ai/*  ---> Python AI Service (:8000)
+                              |
+              +---------------+---------------+
+              |               |               |
+         Classifier      Recommender      Bot (SSE)
+         (LLaMA 3.3)     (LLaMA 3.3)   (LLaMA 3.3)
+              |               |               |
+              +----------> Groq API <---------+
+                              |
+                      In-memory BM25
+                     (IT runbook search)
+
+Go API Server <----> Redis <----> Go Worker Pool (2 replicas x 5 goroutines)
+```
+
+---
+
+## Key Features
+
+**Distributed Task Queue**
+- Priority scheduling — jobs sorted by priority (P1–P4) then FIFO within the same level
+- Automatic retries — configurable max retries per job; exhausted jobs move to dead-letter
+- Dead-letter queue — failed jobs preserved with error context; retryable via API
+- Stale job recovery — background sweeper rescues jobs stuck in processing for more than 5 minutes
+- Horizontal scaling — worker replicas and pool size independently configurable
+
+**AI Capabilities**
+- Zero-shot ticket classification — category, priority, tier, SLA hours, effort estimate, tags
+- Workload recommendation engine — analyses queue state and generates up to 4 prioritised actions
+- Streaming assistant — LLaMA 3.3 70B responses stream token-by-token via Server-Sent Events
+- Knowledge base retrieval — in-memory BM25 search across 10 pre-loaded IT runbooks
+- Session memory — Redis-backed conversation history per bot session
+- Rate limiting — 30 requests per minute per client
+- Prompt injection detection — regex-based guardrails applied before every LLM call
+- SLA tracking — breach risk scoring (ok / warning / at_risk / breached) computed in real time
+- Keyword fallback — classification and recommendations continue working if the LLM is unavailable
+- Demo simulator — generates up to 50 realistic classified tickets to demonstrate queue flood behaviour
+
+---
+
+## Project Structure
+
+```
+.
+├── cmd/
+│   ├── api/main.go               # API server entry point
+│   └── worker/main.go            # Worker pool entry point; registers all job handlers
+├── internal/
+│   ├── api/
+│   │   ├── handler.go            # HTTP handlers (submit, get, list, dead-letter, retry, stats)
+│   │   └── router.go             # Gin route registration
+│   ├── queue/
+│   │   ├── job.go                # Job model, status constants, priority levels
+│   │   ├── queue.go              # Queue interface
+│   │   └── redis_queue.go        # Redis implementation (sorted set + hash + list)
+│   └── worker/
+│       ├── worker.go             # Single worker goroutine
+│       └── pool.go               # Pool manager and stale-job sweeper
+├── rag/
+│   ├── main.py                   # FastAPI app; all /api/ai/* endpoints
+│   ├── classifier.py             # Ticket classification via Groq with keyword fallback
+│   ├── recommender.py            # Workload analysis and recommendations with rule-based fallback
+│   ├── bot.py                    # Streaming AI assistant with BM25 runbook context injection
+│   ├── knowledge.py              # In-memory BM25 knowledge base; 10 IT runbooks
+│   ├── sla.py                    # SLA breach risk calculator
+│   ├── simulator.py              # Demo ticket flood generator
+│   ├── memory.py                 # Redis-backed bot session memory
+│   └── guardrails.py             # Prompt injection detection
+├── frontend/
+│   ├── src/
+│   │   ├── App.jsx               # Tab layout — Ticket Inbox, Queue Health, AI Bot
+│   │   ├── api/index.js          # Unified API client (queue + AI endpoints + SSE)
+│   │   └── components/
+│   │       ├── TicketInbox.jsx   # Ticket submission with AI classification
+│   │       ├── QueueHealth.jsx   # Stats, SLA risk table, AI recommendations
+│   │       └── AIBot.jsx         # Streaming chat with ticket context
+│   └── nginx.conf                # Reverse proxy for SPA routing and API forwarding
+├── infra/
+│   ├── helm/dtq/                 # Helm chart for all services
+│   ├── terraform/                # EKS cluster, VPC, ECR, IAM
+│   └── argocd/                   # GitOps application manifests
+├── docker-compose.yml
+└── go.mod
+```
+
+---
+
+## Running Locally
+
+**Prerequisites:** Docker Desktop, a free Groq API key from https://console.groq.com
+
+```bash
+git clone https://github.com/apatha32/SmartQueue-ai-helpdesk-optimizer.git
+cd SmartQueue-ai-helpdesk-optimizer
+```
+
+Add your key to `.env`:
+
+```
+GROQ_API_KEY=gsk_your-key-here
+```
+
+```bash
+docker compose up --build -d
+```
+
+- Frontend: http://localhost:3001
+- Go API: http://localhost:8080
+- AI Service: http://localhost:8000
+
+---
+
+## Using the Application
+
+**Ticket Inbox** — enter a support request description and click AI Classify to get a category, priority, SLA, and routing decision from LLaMA 3.3 70B. Click Submit to enqueue it. Use the flood simulator to submit up to 50 pre-classified tickets at once.
+
+**Queue Health** — live stats updated every 5 seconds. SLA risk table shows tickets approaching their deadlines. Click Analyse Queue for AI-generated recommendations on the current workload state.
+
+**AI Bot** — select an enqueued ticket from the dropdown and ask questions about it. The bot receives the ticket details plus relevant IT runbook excerpts and streams its response in real time.
+
+---
+
+## REST API Reference
+
+**Queue (Go API — port 8080)**
+
+```
+POST   /api/v1/jobs           Submit a new job
+GET    /api/v1/jobs           List pending and processing jobs
+GET    /api/v1/jobs/:id       Get a job by ID
+GET    /api/v1/jobs/dead      List dead-letter jobs
+POST   /api/v1/jobs/:id/retry Re-enqueue a dead-letter job
+GET    /api/v1/stats          Queue counters
+GET    /health                Liveness probe
+```
+
+**AI Service (FastAPI — port 8000)**
+
+```
+POST   /api/ai/classify       Classify a ticket
+POST   /api/ai/recommend      Analyse queue state and return recommendations
+POST   /api/ai/bot/chat       Streaming chat response (SSE)
+POST   /api/ai/bot/clear      Clear session conversation history
+POST   /api/ai/simulate       Submit N demo tickets
+POST   /api/ai/sla-check      Compute SLA breach risk for a list of jobs
+GET    /health                Liveness probe
+```
+
+---
+
+## Job Lifecycle
+
+```
+submit --> pending --> processing --> completed
+                           |
+                        failure
+                           |
+                    failed (retries left) --> re-enqueued
+                           |
+                    retries exhausted
+                           |
+                         dead --> POST /retry --> pending
+```
+
+A background sweeper runs every 30 seconds and re-enqueues any jobs stuck in processing for more than 5 minutes.
+
+---
+
+## Configuration
+
+**API Server**
+- `REDIS_ADDR` — Redis connection address (default: `localhost:6379`)
+- `PORT` — HTTP listen port (default: `8080`)
+
+**Worker**
+- `REDIS_ADDR` — Redis connection address
+- `WORKER_POOL_SIZE` — concurrent goroutines per replica (default: `5`)
+
+**AI Service**
+- `REDIS_ADDR` — Redis connection address
+- `GROQ_API_KEY` — required for LLM features
+- `OPENROUTER_API_KEY` — optional fallback if `GROQ_API_KEY` is not set
+
+---
+
+## Scaling
+
+```bash
+docker compose up -d --scale worker=4
+```
+
+The Kubernetes manifests in `infra/helm/` include a HorizontalPodAutoscaler configured to scale the worker deployment based on Redis queue depth via the Prometheus Adapter.
+
+---
+
+## Stopping
+
+```bash
+docker compose down      # stop containers, preserve volumes
+docker compose down -v   # stop containers and remove all data
+```
 
 ---
 
