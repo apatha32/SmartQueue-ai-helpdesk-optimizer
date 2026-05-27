@@ -72,9 +72,9 @@ export default function App() {
       </header>
 
       <main className="main">
-        {active === 'inbox'  && <TicketInbox />}
-        {active === 'health' && <QueueHealth />}
-        {active === 'bot'    && <AIBot />}
+        <div style={{ display: active === 'inbox'  ? 'contents' : 'none' }}><TicketInbox /></div>
+        <div style={{ display: active === 'health' ? 'contents' : 'none' }}><QueueHealth /></div>
+        <div style={{ display: active === 'bot'    ? 'contents' : 'none' }}><AIBot /></div>
       </main>
     </div>
   )
