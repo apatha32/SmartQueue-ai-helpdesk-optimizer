@@ -5,7 +5,11 @@ from typing import AsyncGenerator
 from classifier import _llm
 from knowledge import search_knowledge
 
-_BOT_MODEL = os.getenv("BOT_MODEL", "deepseek/deepseek-r1:free")
+# Groq model for fast streaming chat; falls back to OpenRouter DeepSeek
+_BOT_MODEL = os.getenv(
+    "BOT_MODEL",
+    "llama-3.3-70b-versatile" if os.getenv("GROQ_API_KEY") else "deepseek/deepseek-r1:free",
+)
 
 _SYSTEM = """\
 You are SmartQueue Bot, an AI assistant helping IT support workers resolve tickets \
@@ -28,7 +32,10 @@ async def stream_bot_response(
     ticket: dict,
     history: list[dict],
 ) -> AsyncGenerator[str, None]:
-    docs = await search_knowledge(message, k=4)
+    try:
+        docs = await search_knowledge(message, k=4)
+    except Exception:
+        docs = []
     knowledge_text = "\n\n".join(
         f"[{d['source']}]\n{d['content']}" for d in docs
     ) or "No specific runbook matched — apply general IT knowledge."

@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
     try:
         seed_knowledge_base()
     except Exception as exc:
-        print(f"[startup] knowledge base seed failed (ChromaDB may not be ready): {exc}")
+        print(f"[startup] knowledge base seed failed: {exc}")
     yield
 
 
@@ -102,8 +102,6 @@ async def recommend(req: RecommendRequest):
 async def bot_chat(req: BotChatRequest, request: Request):
     if check_injection(req.message):
         raise HTTPException(status_code=400, detail="Invalid input detected")
-    if not os.getenv("OPENROUTER_API_KEY"):
-        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY not configured")
 
     session_id = req.session_id or str(uuid.uuid4())
     history = await get_history(session_id)

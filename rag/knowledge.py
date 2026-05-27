@@ -1,10 +1,7 @@
-"""IT runbook knowledge base backed by ChromaDB (ONNX embeddings — no torch)."""
-import os
+"""IT runbook knowledge base — in-memory BM25-style word-overlap search."""
+import math
 import asyncio
-from functools import lru_cache
-
-import chromadb
-from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+from collections import Counter
 
 RUNBOOKS = [
     {
@@ -143,46 +140,49 @@ RUNBOOKS = [
 ]
 
 
-@lru_cache(maxsize=1)
-def _client():
-    host = os.getenv("CHROMA_HOST", "localhost")
-    port = int(os.getenv("CHROMA_PORT", "8001"))
-    return chromadb.HttpClient(host=host, port=port)
+# ── In-memory BM25-style retrieval (no external DB needed) ──────────────────
+
+def _tokenize(text: str) -> list[str]:
+    return text.lower().split()
 
 
-@lru_cache(maxsize=1)
-def _ef():
-    return DefaultEmbeddingFunction()
+def _idf(term: str, corpus: list[list[str]]) -> float:
+    n = len(corpus)
+    df = sum(1 for doc in corpus if term in doc)
+    return math.log((n - df + 0.5) / (df + 0.5) + 1)
 
 
-def _collection():
-    return _client().get_or_create_collection(
-        name="helpdesk_knowledge",
-        embedding_function=_ef(),
-    )
+_CORPUS = [_tokenize(r["content"]) for r in RUNBOOKS]
+
+
+def _bm25_score(query_tokens: list[str], doc_tokens: list[str], k1: float = 1.5, b: float = 0.75) -> float:
+    avg_dl = sum(len(d) for d in _CORPUS) / len(_CORPUS)
+    tf = Counter(doc_tokens)
+    score = 0.0
+    for term in query_tokens:
+        if term not in tf:
+            continue
+        idf = _idf(term, _CORPUS)
+        dl = len(doc_tokens)
+        score += idf * (tf[term] * (k1 + 1)) / (tf[term] + k1 * (1 - b + b * dl / avg_dl))
+    return score
 
 
 def seed_knowledge_base():
-    """Upsert all runbooks into ChromaDB on startup."""
-    col = _collection()
-    col.upsert(
-        ids=[r["id"] for r in RUNBOOKS],
-        documents=[r["content"] for r in RUNBOOKS],
-        metadatas=[{"source": r["source"]} for r in RUNBOOKS],
-    )
-    print(f"Knowledge base ready — {len(RUNBOOKS)} runbooks loaded")
+    """No-op — knowledge base is in-memory."""
+    print(f"Knowledge base ready — {len(RUNBOOKS)} runbooks loaded (in-memory)")
 
 
 async def search_knowledge(query: str, k: int = 4) -> list[dict]:
-    """Semantic search over IT runbooks (runs in thread to not block event loop)."""
-    loop = asyncio.get_event_loop()
-
-    def _search():
-        col = _collection()
-        results = col.query(query_texts=[query], n_results=min(k, len(RUNBOOKS)))
-        return [
-            {"content": doc, "source": meta.get("source", "KB")}
-            for doc, meta in zip(results["documents"][0], results["metadatas"][0])
-        ]
-
-    return await loop.run_in_executor(None, _search)
+    """BM25 search over IT runbooks."""
+    q_tokens = _tokenize(query)
+    scored = [
+        (_bm25_score(q_tokens, doc_tokens), runbook)
+        for doc_tokens, runbook in zip(_CORPUS, RUNBOOKS)
+    ]
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [
+        {"content": r["content"], "source": r["source"]}
+        for _, r in scored[:k]
+        if _ > 0
+    ]
