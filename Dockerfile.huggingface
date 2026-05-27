@@ -59,6 +59,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY rag/ .
 
+# Default env vars so supervisord %(ENV_*)s expansion never fails
+ENV GROQ_API_KEY=""
+ENV OPENROUTER_API_KEY=""
+
 # ── Configs ──────────────────────────────────────────────────
 COPY supervisord.hf.conf /etc/supervisor/conf.d/supervisord.conf
 COPY nginx.hf.conf       /etc/nginx/sites-available/default
